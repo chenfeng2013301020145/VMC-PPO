@@ -1,0 +1,38 @@
+[2021-04-19 14:53:46,248][nqs_vmcore_complex_ppo.py][INFO] Sequential(
+  (0): CNN_complex_layer(
+    (conv): Sequential(
+      (0): ComplexConv(
+        (conv_re): Conv2d(2, 4, kernel_size=[3, 3], stride=(1, 1))
+        (conv_im): Conv2d(2, 4, kernel_size=[3, 3], stride=(1, 1))
+      )
+      (1): ComplexReLU()
+    )
+  )
+  (1): CNN_complex_layer(
+    (conv): Sequential(
+      (0): ComplexConv(
+        (conv_re): Conv2d(4, 3, kernel_size=[3, 3], stride=(1, 1))
+        (conv_im): Conv2d(4, 3, kernel_size=[3, 3], stride=(1, 1))
+      )
+      (1): ComplexReLU()
+    )
+  )
+  (2): CNN_complex_layer(
+    (conv): Sequential(
+      (0): ComplexConv(
+        (conv_re): Conv2d(3, 2, kernel_size=[3, 3], stride=(1, 1))
+        (conv_im): Conv2d(3, 2, kernel_size=[3, 3], stride=(1, 1))
+      )
+      (1): ComplexReLU()
+    )
+  )
+  (3): OutPut_complex_layer(
+    (linear): ComplexLinear(
+      (linear_re): Linear(in_features=2, out_features=1, bias=False)
+      (linear_im): Linear(in_features=2, out_features=1, bias=False)
+    )
+  )
+)
+[2021-04-19 14:53:46,249][nqs_vmcore_complex_ppo.py][INFO] {'Total': 490, 'Trainable': 490}
+[2021-04-19 14:53:46,250][nqs_vmcore_complex_ppo.py][INFO] mean_spin: 0.0
+[2021-04-19 14:53:46,251][nqs_vmcore_complex_ppo.py][INFO] Start training:

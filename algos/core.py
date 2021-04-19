@@ -253,9 +253,8 @@ class OutPut_complex_layer(nn.Module):
     def forward(self,x):
         x = complex_sym_padding(x, dimensions=self.dimensions)
         # shape of complex x: (batch_size, 2, F, N)
-        norm = np.sqrt(np.prod(x.shape[2:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
-        x = self.linear(x).squeeze(-1)/norm
+        x = self.linear(x).squeeze(-1)
         return x
     
 #--------------------------------------------------------------------

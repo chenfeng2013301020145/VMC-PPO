@@ -4,8 +4,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from sampler.mcmc_sampler_complex_float import MCsampler
-from core import mlp_cnn, get_paras_number, gradient
+from sampler.mcmc_sampler_complex import MCsampler
+from algos.core import mlp_cnn, get_paras_number, gradient
 from utils import SampleBuffer, _get_unique_states, extract_weights, load_weights
 import scipy.io as sio
 import copy

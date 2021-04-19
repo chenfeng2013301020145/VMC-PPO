@@ -188,25 +188,29 @@ class MCsampler():
                 uc_list.reshape([self._n_sample, self._update_size]))
 
 if __name__ == "__main__":
-    from core import mlp_cnn
-    from tfim_spin1d import get_init_state
-    from state_flip_updator import updator
+    import sys
+    sys.path.append('..')
+    
+    from updators import state_flip_updator
+    #from core import mlp_cnn
+    #from tfim_spin1d import get_init_state
+    #from state_flip_updator import updator
 
-    state_size = [10,2]
+    # state_size = [10,2]
 
-    logphi_model = mlp_cnn(state_size, output_size=2, K=2, F=2)
-    state0, _ = get_init_state(state_size,kind='rand')
+    # logphi_model = mlp_cnn(state_size, output_size=2, K=2, F=2)
+    # state0, _ = get_init_state(state_size,kind='rand')
 
-    phi = logphi_model(torch.from_numpy(state0).float())
-    logphi_i = phi[:,0].detach().numpy()
-    theta_i = phi[:,1]
+    # phi = logphi_model(torch.from_numpy(state0).float())
+    # logphi_i = phi[:,0].detach().numpy()
+    # theta_i = phi[:,1]
 
-    Op = updator(state_size)
-    masks = Op.generate_mask(100)
+    # Op = updator(state_size)
+    # masks = Op.generate_mask(100)
 
-    sampler = MCsampler(state_size=state_size, model=logphi_model, state0=state0, updator=updator)
+    # sampler = MCsampler(state_size=state_size, model=logphi_model, state0=state0, updator=updator)
 
-    # state, logphi, theta = sampler.get_single_sample(np.squeeze(state0), logphi_i, theta_i, masks[10], np.random.rand())
+    # # state, logphi, theta = sampler.get_single_sample(np.squeeze(state0), logphi_i, theta_i, masks[10], np.random.rand())
 
-    state, log, theta = sampler._mh_sampler(10, state0, 1234)
-    print(state.shape)
+    # state, log, theta = sampler._mh_sampler(10, state0, 1234)
+    # print(state.shape)

@@ -1,11 +1,12 @@
 # encoding: utf-8
 # update version 2.0: compatible with 2d system
+import sys
+sys.path.append('..')
 
 import numpy as np
 import torch
-from sampler.mcmc_sampler_complex_float import MCsampler
-from nqs_vmcore_complex_ite import SampleBuffer
-from utils import _get_unique_states, _generate_updates
+from sampler.mcmc_sampler_complex import MCsampler
+from utils import SampleBuffer, _get_unique_states, _generate_updates
 
 gpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cpu = torch.device("cpu")
@@ -214,4 +215,5 @@ class SzSz():
 
 
 if __name__ == "__main__":
-    sz = Sz([10,10,2])
+    import sys
+    print(sys.path[0])

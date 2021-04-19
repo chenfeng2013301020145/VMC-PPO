@@ -3,12 +3,14 @@
 # version 2.0 updates: compatible with 2d system, replay buffer
 # version 3.0 updates: double neural networks (real and imag)
 # ppo-clip: early stop with Fubini-Study distance
+import sys
+sys.path.append('..')
 
 import numpy as np
 import torch
 import torch.nn as nn
-from sampler.mcmc_sampler_complex_float import MCsampler
-from core import mlp_cnn, get_paras_number, gradient
+from sampler.mcmc_sampler_complex import MCsampler
+from algos.core import mlp_cnn, get_paras_number, gradient
 from utils import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
 from torch.autograd.functional import jacobian
 import scipy.io as sio
@@ -96,8 +98,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # mean energy from importance sampling in GPU
     def _energy_ops(sample_division):
         data = buffer.get(batch_type='equal', sample_division=sample_division)
-        states, counts, op_states, op_coeffs = data['state'], data['count'], data['update_states'], data['update_coeffs']
-
+        states, counts  = data['state'], data['count']
+        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        
         with torch.no_grad():
             n_sample = op_states.shape[0]
             n_updates = op_states.shape[1]
@@ -116,69 +119,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             Es = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
 
             return (Es*counts).sum().to(cpu), ((Es**2)*counts).sum().to(cpu)
-    
-    def get_energy_ops(model, data):
-        state, op_states, op_coeffs =data['state'], data['update_states'], data['update_coeffs']
-        psi = model(state.float())
-        logphi = psi[:, 0].reshape(len(state), -1)
-        theta = psi[:, 1].reshape(len(state), -1)
-        
-        n_sample = op_states.shape[0]
-        n_updates = op_states.shape[1]
-        op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        psi_ops = model(op_states.float())
-        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
-
-        delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
-        ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
-        data['ops_real'] = ops_real
-        data['ops_imag'] = ops_imag
-        return 
-
-    def get_kl_divergence(data):
-        state, count, logphi0, theta0  = data['state'], data['count'], data['logphi0'], data['theta0']
-        with torch.no_grad():
-            psi = psi_model(state.float())
-            logphi = psi[:, 0].reshape(len(state), -1)
-            theta = psi[:, 1].reshape(len(state), -1)
-            count_norm = count[..., None]/count.sum()
-            
-            deltalogphi = logphi0[...,None] - logphi
-            deltatheta = torch.abs(theta0[...,None] - theta)
-            deltatheta = torch.fmod(torch.min(deltatheta, 2*np.pi-deltatheta), np.pi)
-            
-            # approx kl divergence
-            # kl_phi = (count_norm*deltalogphi**2 + count_norm*deltatheta**2).sum().item()
-            # kl_phi = (deltalogphi**2 + deltatheta**2).mean().item()
-            kl_phi = (count_norm*torch.exp(1j*theta0[...,None])
-                      /torch.exp(logphi0[...,None])*(deltalogphi + 1j*deltatheta)).sum().abs()
-        return kl_phi
-    
-    def get_fidelity(data):
-        state, count, logphi0, theta0  = data['state'], data['count'], data['logphi0'], data['theta0']
-        with torch.no_grad():
-            psi = psi_model(state.float())
-            logphi = psi[:, 0].reshape(len(state), -1)
-            theta = psi[:, 1].reshape(len(state), -1)
-            
-            phiold = count[...,None]*torch.exp(2*logphi0[...,None])
-            phinew = count[...,None]*torch.exp(2*logphi)
-            phiold_norm = phiold/phiold.sum()
-            phinew_norm = phinew/phinew.sum()
-            
-            phi_ratio = (phinew_norm/phiold_norm).sqrt()
-            # deltalogphi = logphi - logphi0[...,None]
-            deltatheta = theta - theta0[...,None]
-            count_norm = count[..., None]/count.sum()
-            
-            # fid = (count_norm*torch.exp(deltalogphi)*torch.exp(-1j*deltatheta)).sum()
-            fid = (count_norm*phi_ratio*torch.exp(1j*deltatheta)).sum()
-            # fid = (phi_ratio*torch.exp(-1j*deltatheta)).sum()
-        return (fid.abs()**2).item()
-    
+  
     def get_fubini_study_distance(data):
         state, count, logphi0, theta0  = data['state'], data['count'], data['logphi0'], data['theta0']
         with torch.no_grad():
@@ -197,19 +138,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             fsd = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
         return fsd.abs()
     
-    def target_fubini_study_distance(AvgE, AvgE2, StdE, lr):
-        AvgE_pN = AvgE/TolSite
-        EG = np.min([-0.5, AvgE_pN-StdE])*TolSite
-        AvgE = AvgE - EG
-        AvgE2 = AvgE2 - 2*AvgE*EG + EG**2
-        lr *= n_optimize
-        return 0.5*np.arccos(np.sqrt((1 - lr*AvgE)**2/(1 - 2*lr*AvgE + lr**2*AvgE2)))
-        
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
         op_states, op_coeffs = data['update_states'], data['update_coeffs']
-        # ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state.float())
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -261,24 +193,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0)
 
     def regular_backward(data):
-        '''
-        tic = time.time()
-        psi_model.zero_grad()
-        loss_re.backward(retain_graph=True)
-        grads_re = []
-        for name, p in psi_model.named_parameters():
-            if name.split(".")[3] == 'conv_re' or name.split(".")[2] == 'linear_re':
-                grads_re.append(p.grad.clone())
-        
-        psi_model.zero_grad()
-        loss_im.backward()
-        t = time.time() - tic
-        cnt = 0
-        for name, p in psi_model.named_parameters():
-            if name.split(".")[3] == 'conv_re' or name.split(".")[2] == 'linear_re':
-                p.grad = grads_re[cnt]
-                cnt += 1
-        '''
         op_model = copy.deepcopy(psi_model)
         params, names = extract_weights(op_model)
 
@@ -307,7 +221,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     # setting optimizer in GPU
     optimizer = torch.optim.Adam(psi_model.parameters(), lr=learning_rate)
-    
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=0.1)
 
     # off-policy optimization from li yang
@@ -318,15 +231,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         for i in range(n_optimize):
             #data = buffer.get(batch_size=batch_size)
             optimizer.zero_grad()
-            
-            dkl = get_kl_divergence(data)
             dfs = get_fubini_study_distance(data)
-            # if wn > target_wn:
-            #     logger.warning(
-            #         'early stop at step={} as reaching maximal WsN'.format(i))
-            #     break
-            
-            deltafid = 1 - get_fidelity(data)
             
             # wn = deltafid
             if dfs > target:
@@ -337,14 +242,14 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             regular_backward(data)
             optimizer.step()
 
-        return dkl, deltafid, dfs
+        return dfs
 
     # ----------------------------------------------------------------
     tic = time.time()
     warmup_n_sample = n_sample // 1
     logger.info('mean_spin: {}'.format(MHsampler._state0_v))
     logger.info('Start training:')
-    DF, DKL, DFS = 0, 0, 0
+    DFS = 0
     # target_fsd = target_wn
 
     for epoch in range(epochs):
@@ -387,7 +292,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        DKL, DF, DFS = update(IntCount, target_fsd)
+        DFS = update(IntCount, target_fsd)
         op_toc = time.time()
 
         sd = 1 if IntCount < batch_size else sample_division
