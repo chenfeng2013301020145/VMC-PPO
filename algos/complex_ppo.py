@@ -129,6 +129,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             theta = psi[:, 1].reshape(len(state), -1)
             
             deltalogphi = logphi - logphi0[...,None]
+            deltalogphi = deltalogphi - deltalogphi.mean()
             deltatheta = theta - theta0[...,None]
             
             phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()
@@ -142,7 +143,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
-        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state.float())
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -155,19 +156,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         weights = count_norm*torch.exp(delta_logphi*2).detach()
         clip_ws = count_norm*torch.clamp(torch.exp(delta_logphi*2), 1-clip_ratio, 1+clip_ratio).detach()
         
-        # calculate the coeffs of the energy
-        n_sample = op_states.shape[0]
-        n_updates = op_states.shape[1]
-        op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        psi_ops = model(op_states.float())
-        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
-
-        delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
-        ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
-
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
         cme_real = (clip_ws*ops_real[..., None]).sum().detach()
@@ -222,7 +210,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=0.1)
 
     def update(batch_size, target):
-        data = buffer.get(batch_size=batch_size)
+        data = buffer.get(batch_size=batch_size, get_eops=True)
         # off-policy update
         for i in range(n_optimize):
             #data = buffer.get(batch_size=batch_size)
@@ -269,6 +257,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
         thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
+        buffer.get_energy_ops(model=MHsampler._model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
 

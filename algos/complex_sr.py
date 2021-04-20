@@ -224,6 +224,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             theta = psi[:, 1].reshape(len(state), -1)
             
             deltalogphi = logphi - logphi0[...,None]
+            deltalogphi = deltalogphi - deltalogphi.mean()
             deltatheta = theta - theta0[...,None]
             
             phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()

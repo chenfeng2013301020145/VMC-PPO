@@ -128,6 +128,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             theta = psi[:, 1].reshape(len(state), -1)
             
             deltalogphi = logphi - logphi0[...,None]
+            deltalogphi = deltalogphi - deltalogphi.mean()
             deltatheta = theta - theta0[...,None]
             
             phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()
@@ -150,6 +151,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # calculate the weights of the energy from important sampling
         delta_logphi = logphi - logphi0[..., None]
+        delta_logphi = delta_logphi - delta_logphi.mean()
         count_norm = (count[...,None]/count.sum()).detach()
         weights = count_norm*torch.exp(delta_logphi*2).detach()
         clip_ws = count_norm*torch.clamp(torch.exp(delta_logphi*2), 1-clip_ratio, 1+clip_ratio).detach()

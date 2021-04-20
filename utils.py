@@ -25,33 +25,36 @@ class SampleBuffer:
         self.update_coeffs = update_coeffs
         self._call_time = 0
         return
+    
+    def get_energy_ops(self, model, Dp, single_state_shape):
+        psi = model(self.states.float())
+        logphi = psi[:, 0].reshape(len(self.states), -1)
+        theta = psi[:, 1].reshape(len(self.states), -1)
+        
+        n_sample = self.update_states.shape[0]
+        n_updates = self.update_states.shape[1]
+        op_states = self.update_states.reshape([-1, Dp]+single_state_shape)
+        psi_ops = model(op_states.float())
+        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
-    def get(self, batch_size=100, batch_type='rand', sample_division=1):
+        delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+        delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
+        op_coeffs = self.update_coeffs
+        self.ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)
+                                  *torch.cos(delta_theta_os), 1).detach()
+        self.ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)
+                                  *torch.sin(delta_theta_os), 1).detach()
+        return 
+
+    def get(self, batch_size=100, batch_type='rand', sample_division=1, get_eops=False):
         n_sample = len(self.states)
         devision_len = n_sample // sample_division 
         
         if n_sample <= batch_size:
-            gpu_states = torch.from_numpy(self.states).float().to(self._device)
-            gpu_counts = torch.from_numpy(self.counts).float().to(self._device)
-            gpu_update_states = torch.from_numpy(self.update_states).float().to(self._device)
-            gpu_update_coeffs = torch.from_numpy(self.update_coeffs).float().to(self._device)
-            gpu_logphi0 = torch.from_numpy(self.logphis).float().to(self._device)
-            gpu_theta0 = torch.from_numpy(self.thetas).float().to(self._device)
+            batch_label = range(len(self.states))
         elif batch_type == 'rand':
             batch_label = np.random.choice(n_sample, batch_size, replace=False)
-            states = self.states[batch_label]
-            logphis = self.logphis[batch_label]
-            thetas = self.thetas[batch_label]
-            counts = self.counts[batch_label]
-            update_states = self.update_states[batch_label]
-            update_coeffs = self.update_coeffs[batch_label]
-
-            gpu_states = torch.from_numpy(states).float().to(self._device)
-            gpu_counts = torch.from_numpy(counts).float().to(self._device)
-            gpu_update_states = torch.from_numpy(update_states).float().to(self._device)
-            gpu_update_coeffs = torch.from_numpy(update_coeffs).float().to(self._device)
-            gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
-            gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
         elif batch_type == 'equal':
             if self._call_time < sample_division - 1:
                 batch_label = range(self._call_time*devision_len, (self._call_time+1)*devision_len)
@@ -59,7 +62,7 @@ class SampleBuffer:
             else:
                 batch_label = range(self._call_time*devision_len, n_sample)
                 self._call_time = 0
-            
+        if not get_eops:
             states = self.states[batch_label]
             logphis = self.logphis[batch_label]
             thetas = self.thetas[batch_label]
@@ -74,8 +77,25 @@ class SampleBuffer:
             gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
             gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
 
-        return dict(state=gpu_states, count=gpu_counts, update_states=gpu_update_states,
-                    update_coeffs=gpu_update_coeffs, logphi0=gpu_logphi0, theta0=gpu_theta0)
+            return dict(state=gpu_states, count=gpu_counts, update_states=gpu_update_states,
+                        update_coeffs=gpu_update_coeffs, logphi0=gpu_logphi0, theta0=gpu_theta0)
+        else:
+            states = self.states[batch_label]
+            logphis = self.logphis[batch_label]
+            thetas = self.thetas[batch_label]
+            counts = self.counts[batch_label]
+            ops_real = self.ops_real[batch_label]
+            ops_imag = self.ops_imag[batch_label]
+
+            gpu_states = torch.from_numpy(states).float().to(self._device)
+            gpu_counts = torch.from_numpy(counts).float().to(self._device)
+            gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
+            gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
+            gpu_ops_real = torch.from_numpy(ops_real).float().to(self._device)
+            gpu_ops_imag = torch.from_numpy(ops_imag).float().to(self._device)
+
+            return dict(state=gpu_states, count=gpu_counts, logphi0=gpu_logphi0, 
+                        theta0=gpu_theta0, ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)
                     
 def _get_unique_states(states, logphis, ustates, ucoeffs):
     """
