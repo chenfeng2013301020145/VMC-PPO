@@ -99,7 +99,7 @@ def random_train(epochs=100, net_args=dict(), Ops_args=dict(), seed=0, batch_siz
     tic = time.time()
     for i in range(epochs):
         data = buffer.get(batch_size=batch_size, batch_type='rand')
-        state, logphi0, theta0  = data['state'], data['logphi0'], data['theta0']
+        #state, logphi0, theta0  = data['state'], data['logphi0'], data['theta0']
         optimizer.zero_grad()
 
         #psi = model(state)
@@ -162,7 +162,7 @@ if __name__ =='__main__':
             state_onehots[i] = torch.from_numpy(value2onehot(state, Dp))
 
         psi = torch.squeeze(model(state_onehots.float())).detach().numpy()
-        logphis = psi[:,0]
+        logphis = psi[:,0] - psi[:,0].mean()
         thetas = psi[:,1]
         probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))
         print(np.sum(probs))

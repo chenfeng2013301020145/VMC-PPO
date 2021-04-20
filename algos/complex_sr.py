@@ -27,12 +27,12 @@ class train_Ops:
         self._ham = kwargs.get('hamiltonian')
         self._get_init_state = kwargs.get('get_init_state')
         self._updator = kwargs.get('updator')
-        # self._sampler = kwargs.get('sampler')
+
 # ------------------------------------------------------------------------
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], resample_condition=50, dimensions='1d', batch_size=1000,
-          sample_division=5, target_wn=0.1, save_freq=10, net_args=dict(), threads=4, epsilon=0.1, seed=0,
+          sample_division=5, target_dfs=0.1, save_freq=10, net_args=dict(), threads=4, epsilon=0.1, seed=0,
           input_fn=0, load_state0=True, output_fn='test'):
     """
     main training process
@@ -58,9 +58,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     """
     seed += 1000*np.sum(np.arange(threads))
     torch.manual_seed(seed)
-    # np.random.seed(seed)
+    np.random.seed(seed)
     
-    output_dir = os.path.join('./results', output_fn)
+    output_dir = os.path.join('../results', output_fn)
     save_dir = os.path.join(output_dir, 'save_model')
     logger = get_logger(os.path.join(output_dir, 'exp_log.txt'))
 
@@ -127,7 +127,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # setting optimizer in GPU
     # optimizer = torch.optim.Adam(logphi_model.parameters(), lr=learning_rate)
     # imaginary time propagation: delta_t = learning_rate
-    def update_one_step(data, learning_rate, epsilon):
+    def update_one_step(data, epsilon):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
         op_states, op_coeffs = data['update_states'], data['update_coeffs']
         # psi = logphi_model(state)
@@ -137,9 +137,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # calculate the weights of the energy from important sampling
         delta_logphi = logphi - logphi0[..., None]
-        #print (delta_logphi.cpu().detach().numpy())
-
-        # delta_logphi = delta_logphi - delta_logphi.mean()*torch.ones(delta_logphi.shape)
         delta_logphi = delta_logphi - delta_logphi.mean()
         weights = count[..., None]*torch.exp(delta_logphi * 2)
         weights_norm = weights.sum()
@@ -154,7 +151,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        # delta_logphi_os = torch.clamp(delta_logphi_os, max=5)
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
         ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
         ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1)
@@ -171,7 +167,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         for name in names:
             name_num.append(int(name.split(".")[0]))
         _, cnts = np.unique(name_num, return_counts=True, axis=0)
-        # net_layers = len(cnts)
 
         ws = psi_model.state_dict()
 
@@ -241,13 +236,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     
     optimizer = torch.optim.Adam(psi_model.parameters(), lr=learning_rate)
 
-    def update(IntCount, learning_rate, epsilon, n_step):
+    def update(IntCount, epsilon, n_step):
         data = buffer.get(batch_size=IntCount)
         t = 0
         for _ in range(n_step):
             # psi_model.zero_grad()
             optimizer.zero_grad()
-            _, dt = update_one_step(data, learning_rate, epsilon)
+            _, dt = update_one_step(data, epsilon)
             optimizer.step()
             t += dt
             dfs = get_fubini_study_distance(data)
@@ -265,18 +260,15 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     for epoch in range(epochs):
         sample_tic = time.time()
         MHsampler._n_sample = warmup_n_sample
-        # print(logphi_model.state_dict())
+
         MHsampler._model.load_state_dict(psi_model.state_dict())
         if epoch == 0:
             MHsampler.first_warmup()
-        if DFS > 2*target_wn:
+        if DFS > 2*target_dfs:
             MHsampler._warmup = True
         else:
             MHsampler._warmup = False
             
-        #cp_model = copy.deepcopy(psi_model)
-        #MHsampler._model = copy.deepcopy(cp_model.cpu())
-        np.random.seed(seed+epoch)
         states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
         n_real_sample = MHsampler._n_sample
 
@@ -284,7 +276,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
                                                                             update_states, update_coeffs)
 
-        # psi = MHsampler._model(torch.from_numpy(states).float())
         psi = psi_model(torch.from_numpy(states).float().to(gpu))
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
         thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
@@ -294,13 +285,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         sample_toc = time.time()
 
-        #logphi_model = logphi_model.to(gpu)
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        # epsilon_decay = epsilon*(0.9**(epoch//50))
         n_step = epoch + 1 if epoch + 1 < n_optimize else n_optimize
-        DFS = update(IntCount, learning_rate, epsilon, n_optimize)
-        # logger.info(mean_e.to(cpu).detach().numpy()/TolSite)
+        DFS = update(IntCount, epsilon, n_optimize)
         op_toc = time.time()
         
         sd = 1 if IntCount < batch_size else sample_division
@@ -337,6 +325,3 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     logger.info('Finish training.')
 
     return psi_model.to(cpu), MHsampler.single_state0, AvgE
-
-if __name__ == "__main__":
-    from core import mlp_cnn

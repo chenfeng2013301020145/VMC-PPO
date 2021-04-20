@@ -26,12 +26,12 @@ class train_Ops:
         self._ham = kwargs.get('hamiltonian')
         self._get_init_state = kwargs.get('get_init_state')
         self._updator = kwargs.get('updator')
-        # self._sampler = kwargs.get('sampler')
+
 # ------------------------------------------------------------------------
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=3000, clip_ratio=0.1,
-          sample_division=5, target_wn=10, save_freq=10, net_args=dict(), threads=4, seed=0,
+          sample_division=5, target_dfs=0.1, save_freq=10, net_args=dict(), threads=4, seed=0,
           input_fn=0, load_state0=True, output_fn='test'):
     """
     main training process
@@ -57,8 +57,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     """
     seed += 1000*np.sum(np.arange(threads))
     torch.manual_seed(seed)
+    np.random.seed(seed)
     
-    output_dir = os.path.join('./results', output_fn)
+    output_dir = os.path.join('../results', output_fn)
     save_dir = os.path.join(output_dir, 'save_model')
     logger = get_logger(os.path.join(output_dir, 'exp_log.txt'))
 
@@ -149,6 +150,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # calculate the weights of the energy from important sampling
         delta_logphi = logphi - logphi0[..., None]
+        delta_logphi = delta_logphi - delta_logphi.mean()
         count_norm = (count[...,None]/count.sum()).detach()
         weights = count_norm*torch.exp(delta_logphi*2).detach()
         clip_ws = count_norm*torch.clamp(torch.exp(delta_logphi*2), 1-clip_ratio, 1+clip_ratio).detach()
@@ -173,22 +175,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         E_re_re = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
         cE_re_re = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
         loss_re_re = 0.5*torch.max(weights*E_re_re, clip_ws*cE_re_re).sum()
-        # loss_re_re = 0.5*(weights*E_re_re).sum()
 
         E_re_im = ops_real[..., None]*theta - me_real*theta - ops_imag[..., None]*logphi
         cE_re_im = ops_real[..., None]*theta - cme_real*theta - ops_imag[..., None]*logphi
         loss_re_im = 0.5*torch.max(weights*E_re_im, clip_ws*cE_re_im).sum()
-        # loss_re_im = 0.5*(weights*E_re_im).sum()
 
         E_im_re = -ops_real[..., None]*theta + me_real*theta + ops_imag[...,None]*logphi
         cE_im_re = -ops_real[..., None]*theta + cme_real*theta + ops_imag[...,None]*logphi
         loss_im_re = 0.5*torch.max(weights*E_im_re, clip_ws*cE_im_re).sum()
-        # loss_im_re = 0.5*(weights*E_im_re).sum()
 
         E_im_im = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
         cE_im_im = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
         loss_im_im = 0.5*torch.max(weights*E_im_im, clip_ws*cE_im_im).sum()
-        # loss_im_im = 0.5*(weights*E_im_im).sum()
 
         return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0)
 
@@ -223,10 +221,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     optimizer = torch.optim.Adam(psi_model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=0.1)
 
-    # off-policy optimization from li yang
     def update(batch_size, target):
         data = buffer.get(batch_size=batch_size)
-        # get_energy_ops(psi_model, data)
         # off-policy update
         for i in range(n_optimize):
             #data = buffer.get(batch_size=batch_size)
@@ -246,34 +242,22 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     # ----------------------------------------------------------------
     tic = time.time()
-    warmup_n_sample = n_sample // 1
     logger.info('mean_spin: {}'.format(MHsampler._state0_v))
     logger.info('Start training:')
     DFS = 0
-    # target_fsd = target_wn
 
     for epoch in range(epochs):
-        if epoch < 50:
-            target_fsd = 2*target_wn
-        elif epoch > epochs - 100:
-            target_fsd = 0.5*target_wn
-        else:
-            target_fsd = target_wn
-            
         sample_tic = time.time()
-        MHsampler._n_sample = warmup_n_sample
-        
         # sync parameters
         MHsampler._model.load_state_dict(psi_model.state_dict())
         if epoch == 0:
             MHsampler.first_warmup()
         # update the mh_model
-        if DFS > 2*target_fsd:
+        if DFS > 2*target_dfs:
             MHsampler._warmup = True
         else:
             MHsampler._warmup = False
 
-        np.random.seed(seed+epoch)
         states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
         n_real_sample = MHsampler._n_sample
 
@@ -292,7 +276,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        DFS = update(IntCount, target_fsd)
+        DFS = update(IntCount, target_dfs)
         op_toc = time.time()
 
         sd = 1 if IntCount < batch_size else sample_division
@@ -310,8 +294,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         # adjust the learning rate
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
-        # target_fsd = target_fubini_study_distance(AvgE,AvgE2,StdE,lr)
-        # print(target_fsd)
         # print training informaition
         logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
                     format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
@@ -322,10 +304,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
                 os.makedirs(save_dir)
             torch.save(psi_model.state_dict(), os.path.join(save_dir, 'model_'+str(epoch)+'.pkl'))
             sio.savemat(os.path.join(output_dir, 'state0.mat'), {'state0': MHsampler.single_state0})
-
-        if warmup_n_sample != n_sample:
-            # first 10 epochs are used to warm up due to the limitations of memory
-            warmup_n_sample += n_sample // 1
 
     logger.info('Finish training.')
 
