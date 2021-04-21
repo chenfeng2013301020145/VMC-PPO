@@ -234,38 +234,3 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
     """
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
-
-# conjugate gradient from openai/baseline
-def cg(f_Ax, b, cg_iters=10, callback=None, verbose=False, residual_tol=1e-10):
-    """
-    Demmel p 312
-    """
-    p = b.clone()
-    r = b.clone()
-    x = torch.zeros_like(b)
-    rdotr = (r*r).sum()
-
-    fmtstr =  "%10i %10.3g %10.3g"
-    titlestr =  "%10s %10s %10s"
-    if verbose: print(titlestr % ("iter", "residual norm", "soln norm"))
-
-    for i in range(cg_iters):
-        if callback is not None:
-            callback(x)
-        if verbose: print(fmtstr % (i, rdotr, x.norm()))
-        z = f_Ax(p)
-        v = rdotr / (p*z).sum()
-        x += v*p
-        r -= v*z
-        newrdotr = (r*r).sum()
-        mu = newrdotr/rdotr
-        p = r + mu*p
-
-        rdotr = newrdotr
-        if rdotr < residual_tol:
-            break
-
-    if callback is not None:
-        callback(x)
-    if verbose: print(fmtstr % (i+1, rdotr, x.norm()))  # pylint: disable=W0631
-    return x
