@@ -27,20 +27,20 @@ class SampleBuffer:
         return
     
     def get_energy_ops(self, model, Dp, single_state_shape):
-        psi = model(self.states.float())
+        psi = model(torch.from_numpy(self.states).float())
         logphi = psi[:, 0].reshape(len(self.states), -1)
         theta = psi[:, 1].reshape(len(self.states), -1)
         
         n_sample = self.update_states.shape[0]
         n_updates = self.update_states.shape[1]
         op_states = self.update_states.reshape([-1, Dp]+single_state_shape)
-        psi_ops = model(op_states.float())
+        psi_ops = model(torch.from_numpy(op_states).float())
         logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
         theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        op_coeffs = self.update_coeffs
+        op_coeffs = torch.from_numpy(self.update_coeffs)
         self.ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)
                                   *torch.cos(delta_theta_os), 1).detach()
         self.ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)
@@ -91,8 +91,8 @@ class SampleBuffer:
             gpu_counts = torch.from_numpy(counts).float().to(self._device)
             gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
             gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
-            gpu_ops_real = torch.from_numpy(ops_real).float().to(self._device)
-            gpu_ops_imag = torch.from_numpy(ops_imag).float().to(self._device)
+            gpu_ops_real = ops_real.float().to(self._device)
+            gpu_ops_imag = ops_imag.float().to(self._device)
 
             return dict(state=gpu_states, count=gpu_counts, logphi0=gpu_logphi0, 
                         theta0=gpu_theta0, ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)

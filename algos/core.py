@@ -28,21 +28,21 @@ def complex_periodic_padding(x, kernel_size, dimensions):
 def sym_padding(x, dimensions):
     if dimensions == '1d':
         # shape of complex x: (batch_size, Dp, N)
-        return torch.cat((x, x[:,:,0:-1]), -1)
+        return torch.cat((x, x[:,:,0:1]), -1)
     else:
         # shape of complex x: (batch_size, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,0:-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,0:-1]), -1)
+        x = torch.cat((x, x[:,:,0:1,:]), -2)
+        x = torch.cat((x, x[:,:,:,0:1]), -1)
         return x
 
 def complex_sym_padding(x, dimensions):
     if dimensions == '1d':
         # shape of complex x: (batch_size, 2, Dp, N)
-        return torch.cat((x, x[:,:,:,0:-1]), -1)
+        return torch.cat((x, x[:,:,:,0:1]), -1)
     else:
         # shape of complex x: (batch_size, 2, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,:,0:-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,:,0:-1]), -1)
+        x = torch.cat((x, x[:,:,:,0:1,:]), -2)
+        x = torch.cat((x, x[:,:,:,:,0:1]), -1)
         return x
 
 def get_paras_number(net):
@@ -255,9 +255,6 @@ class OutPut_complex_layer(nn.Module):
         # shape of complex x: (batch_size, 2, F, N)
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
-        z = x[:,0] + 1j*x[:,1]
-        x[:,0] = z.abs()
-        x[:,1] = z.angle()
         return x
     
 #--------------------------------------------------------------------
@@ -281,19 +278,17 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
 
         def weight_init(m):
             if isinstance(m, ComplexConv):
-                nn.init.xavier_uniform_(m.conv_re.weight)
-                nn.init.xavier_uniform_(m.conv_im.weight)
+                nn.init.xavier_uniform_(m.conv_re.weight, gain=2/np.sqrt(2))
+                nn.init.xavier_uniform_(m.conv_im.weight, gain=2/np.sqrt(2))
                 if m.conv_re.bias is not None:
                     nn.init.zeros_(m.conv_re.bias)
                     nn.init.zeros_(m.conv_im.bias)
             elif isinstance(m, ComplexLinear):
-                nn.init.xavier_uniform_(m.linear_re.weight)
-                nn.init.xavier_uniform_(m.linear_im.weight)
+                nn.init.xavier_uniform_(m.linear_re.weight, gain=1/np.sqrt(2))
+                nn.init.xavier_uniform_(m.linear_im.weight, gain=1/np.sqrt(2))
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
-        #complex_init(model)
-        #model.apply(add_noise_to_weights)
     else:
         Dp = state_size[-1]
 
