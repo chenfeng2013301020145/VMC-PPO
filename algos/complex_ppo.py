@@ -95,11 +95,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
                           updator=updator, operator=_ham)
     
     if input_fn != 0:
-        load_model = torch.load(os.path.join('./results', input_fn))
+        load_model = torch.load(os.path.join('../results', input_fn))
         psi_model.load_state_dict(load_model)
         if load_state0:
             fn_name = os.path.split(os.path.split(input_fn)[0])
-            mat_content = sio.loadmat(os.path.join('./results',fn_name[0], 'state0.mat'))
+            mat_content = sio.loadmat(os.path.join('../results',fn_name[0], 'state0.mat'))
             MHsampler.single_state0 = mat_content['state0']
 
     # mean energy from importance sampling in GPU

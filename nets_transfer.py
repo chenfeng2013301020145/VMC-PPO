@@ -26,7 +26,11 @@ class train_Ops:
 def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=dict(),
     Ham_args=dict(), learning_rate=1E-3, n_sample=1000, init_type='rand', threads=4,
     batch_size = 1000, state_size=[10,10,2], input_mh_fn=0, load_state0=True, 
-    output_fn='test'):
+    output_fn='test', seed=0):
+    
+    seed += 1000*np.sum(np.arange(threads))
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
     output_dir = os.path.join('./results', output_fn)
     save_dir = os.path.join(output_dir, 'save_model')
@@ -118,15 +122,17 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
         os.makedirs(save_dir)
     torch.save(big_model.state_dict(), os.path.join(save_dir, 'model_TL.pkl'))
     sio.savemat(os.path.join(output_dir, 'state0.mat'), {'state0': MHsampler.single_state0})
-    return big_model.to(cpu)
+    return big_model.to(cpu), MHsampler.single_state0
 
 if __name__ =='__main__':
     from updators.state_swap_updator import updator
     from ops.HS_spin2d import Heisenberg2DTriangle, get_init_state, value2onehot
+    from ops.operators import cal_op
     import torch.nn as nn
     from utils import decimalToAny
 
-    state_size = [3, 4, 2]
+    state_size = [4, 3, 2]
+    TolSite = state_size[0]*state_size[1]
     Ops_args = dict(hamiltonian=Heisenberg2DTriangle, get_init_state=get_init_state, updator=updator)
     Ham_args = dict(state_size=state_size, pbc=True)
     net_args = dict(K=3, F=[5,4,3], complex_nn=True, relu_type='softplus2')
@@ -135,9 +141,16 @@ if __name__ =='__main__':
     # input_fn = 'HS_2d_sq_L3W2/save_model/model_199.pkl'
     output_fn ='HS_2d_tri_L4W3_vmcppo_TL'
 
-    trained_model = transfer(epochs=100, small_net_args=mh_net_args, big_net_args=net_args, Ops_args=Ops_args,
-            Ham_args=Ham_args, learning_rate=1E-4, n_sample=140000, init_type='rand', threads=70,
+    trained_model, state0 = transfer(epochs=100, small_net_args=mh_net_args, big_net_args=net_args, Ops_args=Ops_args,
+            Ham_args=Ham_args, learning_rate=1E-4, n_sample=70000, init_type='rand', threads=35, seed=181,
             state_size=state_size, input_mh_fn=input_mh_fn, load_state0=False, output_fn=output_fn)
+    
+    calculate_op = cal_op(state_size=state_size, psi_model=trained_model,
+            state0=state0, n_sample=70000, updator=updator,
+            get_init_state=get_init_state, threads=35, sample_division=10)
+    
+    meane, stde, IntCount = calculate_op.get_value(operator=Heisenberg2DTriangle, op_args=Ham_args)
+    print([meane/TolSite, stde/TolSite, IntCount])
 
     def b_check():
         Dp = state_size[-1]

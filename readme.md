@@ -22,7 +22,7 @@ Optimization object,
 
 where <img src="http://latex.codecogs.com/gif.latex?E_w"> is the energy estimated via importance sampling and <img src="http://latex.codecogs.com/gif.latex?D_{FS}"> is the Fubini-Study distance.
 
-### PPO algorthim
+### PPO algorthim 
     algos.pesudocomplex_ppo or algos.complex_ppo
 NGD can be approximately solved by PPO-clip and PPO-clip updates wavefunctions via,
 
@@ -50,4 +50,3 @@ with a Lagrange multiplier <img src="http://latex.codecogs.com/gif.latex?\lambda
 which is the exact TDVP equation.
 
 
-## Reference

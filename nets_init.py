@@ -167,6 +167,6 @@ if __name__ =='__main__':
         probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))
         print(np.sum(probs))
 
-        sio.savemat('./data/test_data_HS2dtri_L3W2init.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
+        sio.savemat('./test/data/test_data_HS2dtri_L3W2init.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
     b_check()
