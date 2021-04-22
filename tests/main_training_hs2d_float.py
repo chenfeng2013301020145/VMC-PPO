@@ -27,24 +27,23 @@ parser.add_argument('--Dp', type=int, default=2)
 parser.add_argument('--threads', type=int, default=4)
 parser.add_argument('--kernels', type=int, default=3)
 parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
-parser.add_argument('--layers', type=int, default=2)
-parser.add_argument('--wn', type=float, default=10)
+parser.add_argument('--dfs', type=float, default=10)
 args = parser.parse_args()
 
 state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=Heisenberg2DSquare, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters)
+net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2')
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
-output_fn ='HS_2d_sq_L4W4_vmc'
+output_fn ='HS_2d_sq_L3W2_vmcppo'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed =0,
         learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d',
         net_args=net_args, threads=args.threads, input_fn=input_fn, 
-        output_fn=output_fn, target_wn=args.wn, sample_division=5)
+        output_fn=output_fn, target_dfs=args.dfs, sample_division=5)
 # print(state0.shape)
 calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model,
             state0=state0, n_sample=args.n_sample, updator=updator,
@@ -89,12 +88,9 @@ def b_check():
     # state_onehots[:,:,-1] = state_onehots[:,:,0]
     # state_onehots = state_onehots[spin_number.argsort(),:,:]
 
-    #psi = torch.squeeze(trained_logphi_model(state_onehots.float())).detach().numpy()
-    #logphis = psi[:,0]
-    #thetas = psi[:,1]
     psi = torch.squeeze(trained_psi_model(state_onehots.float())).detach().numpy()
-    logphis = psi.abs()
-    thetas = psi.angle()
+    logphis = psi[:,0] - np.mean(psi[:,0])
+    thetas = psi[:,1]
     probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))
     print(np.sum(probs))
 
@@ -102,36 +98,6 @@ def b_check():
     # plt.bar(np.sort(spin_number), np.exp(logphis*2)/np.sum(np.exp(logphis*2)))
     # plt.show()
 
-    sio.savemat('test_data_HS2dsq_L4W4.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
+    sio.savemat('./data/test_data_HS2dsq_L3W2.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
 b_check()
-# phase diagram for g \in [-2,2]
-'''
-sz_list = []
-sx_list = []
-energy = []
-for g in np.linspace(-1,1,20):
-    Ops_args = dict(hamiltonian=TFIMSpin1D, get_init_state=get_init_state, updator=updator)
-    Ham_args = dict(g=g, pbc=True)
-    net_args = dict(K=3, F=4, layers=4)
-    output_fn ='TFIM_1d'
-    state_size = [10,2]
-
-    trained_model, mean_e = train(epochs=100, Ops_args=Ops_args, Ham_args=Ham_args, n_sample=7000,
-            n_optimize=100, learning_rate=1E-4, state_size=state_size,
-            save_freq=10, net_args=net_args, threads=70, output_fn=output_fn)
-
-    calculate_op = cal_op(state_size=state_size, model=trained_model, n_sample=21000,
-            updator=updator, init_type='ferro', get_init_state=get_init_state, threads=70)
-
-    sz, _, _ = calculate_op.get_value(operator=Sz)
-
-    sx, _, _ = calculate_op.get_value(operator=Sx)
-
-    print([sz, sx])
-    sz_list.append(sz)
-    sx_list.append(sx)
-    energy.append(mean_e)
-
-sio.savemat('tfim_pd_data.mat',{'sz':np.array(sz_list), 'sx':np.array(sx_list), 'energy':np.array(energy)})
-'''

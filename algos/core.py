@@ -28,21 +28,21 @@ def complex_periodic_padding(x, kernel_size, dimensions):
 def sym_padding(x, dimensions):
     if dimensions == '1d':
         # shape of complex x: (batch_size, Dp, N)
-        return torch.cat((x, x[:,:,0:-1]), -1)
+        return torch.cat((x, x[:,:,0:1]), -1)
     else:
         # shape of complex x: (batch_size, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,0:-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,0:-1]), -1)
+        x = torch.cat((x, x[:,:,0:1,:]), -2)
+        x = torch.cat((x, x[:,:,:,0:1]), -1)
         return x
 
 def complex_sym_padding(x, dimensions):
     if dimensions == '1d':
         # shape of complex x: (batch_size, 2, Dp, N)
-        return torch.cat((x, x[:,:,:,0:-1]), -1)
+        return torch.cat((x, x[:,:,:,0:1]), -1)
     else:
         # shape of complex x: (batch_size, 2, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,:,0:-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,:,0:-1]), -1)
+        x = torch.cat((x, x[:,:,:,0:1,:]), -2)
+        x = torch.cat((x, x[:,:,:,:,0:1]), -1)
         return x
 
 def get_paras_number(net):
@@ -253,11 +253,9 @@ class OutPut_complex_layer(nn.Module):
     def forward(self,x):
         x = complex_sym_padding(x, dimensions=self.dimensions)
         # shape of complex x: (batch_size, 2, F, N)
+        # norm = np.sqrt(np.prod(x.shape[3:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
-        z = x[:,0] + 1j*x[:,1]
-        x[:,0] = z.abs()
-        x[:,1] = z.angle()
         return x
     
 #--------------------------------------------------------------------
@@ -281,19 +279,17 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
 
         def weight_init(m):
             if isinstance(m, ComplexConv):
-                nn.init.xavier_uniform_(m.conv_re.weight)
-                nn.init.xavier_uniform_(m.conv_im.weight)
+                nn.init.xavier_uniform_(m.conv_re.weight, gain=1/np.sqrt(2))
+                nn.init.xavier_uniform_(m.conv_im.weight, gain=1/np.sqrt(2))
                 if m.conv_re.bias is not None:
                     nn.init.zeros_(m.conv_re.bias)
                     nn.init.zeros_(m.conv_im.bias)
             elif isinstance(m, ComplexLinear):
-                nn.init.xavier_uniform_(m.linear_re.weight)
-                nn.init.xavier_uniform_(m.linear_im.weight)
+                nn.init.xavier_uniform_(m.linear_re.weight, gain=1/np.sqrt(2))
+                nn.init.xavier_uniform_(m.linear_im.weight, gain=1/np.sqrt(2))
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
-        #complex_init(model)
-        #model.apply(add_noise_to_weights)
     else:
         Dp = state_size[-1]
 
@@ -318,19 +314,21 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
         model.apply(weight_init)
     return model
 
+    
 # ------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     # logphi_model = CNNnet_1d(10,2)
     seed = 10086
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True, inverse_sym=True,
+    logphi_model = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
-
-    from operators.tfim_spin2d import get_init_state
+    import sys
+    sys.path.append('..')
+    from ops.tfim_spin2d import get_init_state
     state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     #print(state0[0]) 
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
@@ -340,11 +338,5 @@ if __name__ == '__main__':
     # theta = phi[:,1].reshape(1,-1)
     print(phi[:,0].std()/phi[:,0].mean())
     print(phi[:,1].std()/phi[:,1].mean(),phi[:,1].max(), phi[:,1].min())
-    complex_init(logphi_model)
-    target_angle = np.random.uniform(-np.pi, np.pi, size=500)
-    import matplotlib.pyplot as plt
-    plt.figure()
-    plt.hist(target_angle)
-    plt.show()
-    # print(logphi)
+
 

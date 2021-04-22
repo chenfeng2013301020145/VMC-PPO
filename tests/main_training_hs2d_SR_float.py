@@ -27,7 +27,7 @@ parser.add_argument('--Dp', type=int, default=2)
 parser.add_argument('--threads', type=int, default=4)
 parser.add_argument('--kernels', type=int, default=3)
 parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
-parser.add_argument('--wn', type=float, default=10)
+parser.add_argument('--dfs', type=float, default=10)
 parser.add_argument('--epsilon', type=float, default=0.1)
 args = parser.parse_args()
 
@@ -41,10 +41,10 @@ input_fn = 0
 output_fn ='HS_2d_tri_L3W3_SRc'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed=0,
         learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d', epsilon=args.epsilon,
         net_args=net_args, threads=args.threads, input_fn=input_fn, output_fn=output_fn, load_state0=False,
-        target_wn=args.wn, sample_division=5)
+        target_dfs=args.dfs, sample_division=5)
 # print(state0.shape)
 calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model,
             state0=state0, n_sample=args.n_sample, updator=updator,
@@ -89,7 +89,7 @@ def b_check():
     # state_onehots = state_onehots[spin_number.argsort(),:,:]
 
     psi = torch.squeeze(trained_psi_model(state_onehots.float())).detach().numpy()
-    logphis = psi[:,0]
+    logphis = psi[:,0] - np.mean(psi[:,0])
     thetas = psi[:,1]
     probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))
     print(np.sum(probs))
@@ -101,33 +101,4 @@ def b_check():
     sio.savemat('./data/test_data_HS2dtri_L2W4.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
 b_check()
-# phase diagram for g \in [-2,2]
-'''
-sz_list = []
-sx_list = []
-energy = []
-for g in np.linspace(-1,1,20):
-    Ops_args = dict(hamiltonian=TFIMSpin1D, get_init_state=get_init_state, updator=updator)
-    Ham_args = dict(g=g, pbc=True)
-    net_args = dict(K=3, F=4, layers=4)
-    output_fn ='TFIM_1d'
-    state_size = [10,2]
 
-    trained_model, mean_e = train(epochs=100, Ops_args=Ops_args, Ham_args=Ham_args, n_sample=7000,
-            n_optimize=100, learning_rate=1E-4, state_size=state_size,
-            save_freq=10, net_args=net_args, threads=70, output_fn=output_fn)
-
-    calculate_op = cal_op(state_size=state_size, model=trained_model, n_sample=21000,
-            updator=updator, init_type='ferro', get_init_state=get_init_state, threads=70)
-
-    sz, _, _ = calculate_op.get_value(operator=Sz)
-
-    sx, _, _ = calculate_op.get_value(operator=Sx)
-
-    print([sz, sx])
-    sz_list.append(sz)
-    sx_list.append(sx)
-    energy.append(mean_e)
-
-sio.savemat('tfim_pd_data.mat',{'sz':np.array(sz_list), 'sx':np.array(sx_list), 'energy':np.array(energy)})
-'''

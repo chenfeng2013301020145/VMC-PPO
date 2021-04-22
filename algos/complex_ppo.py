@@ -144,7 +144,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             phinew_phinew = (count[...,None]*torch.exp(2*deltalogphi)).sum()
             
             fsd = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
-        return fsd.abs()
+        return fsd.abs()**2
     
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
@@ -163,6 +163,19 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         clip_ws = count[...,None]*torch.clamp(torch.exp(delta_logphi*2), 
                                          1-clip_ratio, 1+clip_ratio)
         clip_ws = (clip_ws/clip_ws.sum()).detach()
+        
+        # calculate the coeffs of the energy
+        # n_sample = op_states.shape[0]
+        # n_updates = op_states.shape[1]
+        # op_states = op_states.reshape([-1, Dp]+single_state_shape)
+        # psi_ops = model(op_states.float())
+        # logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
+        # theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+
+        # delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+        # delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
+        # ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
+        # ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
         
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
@@ -244,6 +257,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     for epoch in range(epochs):
         sample_tic = time.time()
+        if epoch > epochs - 100:
+            target = 0.5*target_dfs
+        else:
+            target = target_dfs
         # sync parameters
         MHsampler._model.load_state_dict(psi_model.state_dict())
         if epoch == 0:
@@ -265,7 +282,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
         thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
-        buffer.get_energy_ops(model=MHsampler._model, Dp=Dp, single_state_shape=single_state_shape)
+        buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
 
@@ -273,7 +290,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        DFS = update(IntCount, target_dfs)
+        DFS = update(IntCount, target)
         op_toc = time.time()
 
         sd = 1 if IntCount < batch_size else sample_division
@@ -292,10 +309,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
         # print training informaition
-        logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f},\
-                    IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
-                    format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, 
-                           sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
+        logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
+                    format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
