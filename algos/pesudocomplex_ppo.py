@@ -137,7 +137,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             phinew_phinew = (count[...,None]*torch.exp(2*deltalogphi)).sum()
             
             fsd = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
-        return fsd.abs()
+        return fsd.abs()**2
 
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(data):

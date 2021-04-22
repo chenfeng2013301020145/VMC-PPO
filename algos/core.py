@@ -321,7 +321,7 @@ if __name__ == '__main__':
     seed = 10086
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True, inverse_sym=True,
+    logphi_model = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
