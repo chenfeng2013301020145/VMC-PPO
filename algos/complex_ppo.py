@@ -40,12 +40,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     Args:
         epochs (int): Number of epochs of interaction.
+        
+        Ops_args (dict): setup the names of operators.
+        
+        Ham_args (dict): setup the Hamiltonian.
+        
+        init_type (str): set the type of generated initial states
 
         n_sample (int): Number of sampling in each epoch.
 
         n_optimize (int): Number of update in each epoch.
 
-        lr: learning rate for Adam.
+        learning_rate: learning rate for Adam.
 
         state_size: size of a single state, [n_sites, Dp].
 
@@ -145,16 +151,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
         ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
-        psi = model(state.float())
+        psi = model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
         theta = psi[:, 1].reshape(len(state), -1)
 
         # calculate the weights of the energy from important sampling
         delta_logphi = logphi - logphi0[..., None]
         delta_logphi = delta_logphi - delta_logphi.mean()
-        count_norm = (count[...,None]/count.sum()).detach()
-        weights = count_norm*torch.exp(delta_logphi*2).detach()
-        clip_ws = count_norm*torch.clamp(torch.exp(delta_logphi*2), 1-clip_ratio, 1+clip_ratio).detach()
+        weights = count[...,None]*torch.exp(delta_logphi*2)
+        weights = (weights/weights.sum()).detach()
+        clip_ws = count[...,None]*torch.clamp(torch.exp(delta_logphi*2), 
+                                         1-clip_ratio, 1+clip_ratio)
+        clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
@@ -210,14 +218,14 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=0.1)
 
     def update(batch_size, target):
+        # full samples for small systems
         data = buffer.get(batch_size=batch_size, get_eops=True)
         # off-policy update
         for i in range(n_optimize):
-            #data = buffer.get(batch_size=batch_size)
+            # random batch for large systems
+            # data = buffer.get(batch_size=batch_size, batch_type='rand', get_energy_ops)
             optimizer.zero_grad()
             dfs = get_fubini_study_distance(data)
-            
-            # wn = deltafid
             if dfs > target:
                 logger.warning(
                     'early stop at step={} as reaching maximal FS distance'.format(i))
@@ -284,8 +292,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
         # print training informaition
-        logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
-                    format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
+        logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f},\
+                    IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
+                    format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, 
+                           sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:

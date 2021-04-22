@@ -255,6 +255,9 @@ class OutPut_complex_layer(nn.Module):
         # shape of complex x: (batch_size, 2, F, N)
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
+        z = x[:,0] + 1j*x[:,1]
+        x[:,0] = z.abs()
+        x[:,1] = z.angle()
         return x
     
 #--------------------------------------------------------------------
