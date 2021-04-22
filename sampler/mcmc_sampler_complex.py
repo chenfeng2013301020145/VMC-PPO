@@ -160,7 +160,7 @@ class MCsampler():
         self._n_sample = int(n_sample_per_thread*self._threads)
 
         results = []
-        seed_list = np.random.randint(0, 10000, size=self._threads)
+        seed_list = np.random.choice(10000, size=self._threads)
         for i in range(self._threads):
             results.append(pool.apply_async(self._mh_sampler, 
                     (n_sample_per_thread, self._state0[i], seed_list[i], )))

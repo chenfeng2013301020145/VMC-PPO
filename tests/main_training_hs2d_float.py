@@ -27,7 +27,6 @@ parser.add_argument('--Dp', type=int, default=2)
 parser.add_argument('--threads', type=int, default=4)
 parser.add_argument('--kernels', type=int, default=3)
 parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
-parser.add_argument('--layers', type=int, default=2)
 parser.add_argument('--dfs', type=float, default=10)
 args = parser.parse_args()
 
@@ -89,7 +88,7 @@ def b_check():
     # state_onehots[:,:,-1] = state_onehots[:,:,0]
     # state_onehots = state_onehots[spin_number.argsort(),:,:]
 
-    psi = torch.squeeze(trained_logphi_model(state_onehots.float())).detach().numpy()
+    psi = torch.squeeze(trained_psi_model(state_onehots.float())).detach().numpy()
     logphis = psi[:,0] - np.mean(psi[:,0])
     thetas = psi[:,1]
     probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))

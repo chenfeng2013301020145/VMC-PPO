@@ -253,6 +253,7 @@ class OutPut_complex_layer(nn.Module):
     def forward(self,x):
         x = complex_sym_padding(x, dimensions=self.dimensions)
         # shape of complex x: (batch_size, 2, F, N)
+        # norm = np.sqrt(np.prod(x.shape[3:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
         return x
@@ -278,8 +279,8 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
 
         def weight_init(m):
             if isinstance(m, ComplexConv):
-                nn.init.xavier_uniform_(m.conv_re.weight, gain=2/np.sqrt(2))
-                nn.init.xavier_uniform_(m.conv_im.weight, gain=2/np.sqrt(2))
+                nn.init.xavier_uniform_(m.conv_re.weight, gain=1/np.sqrt(2))
+                nn.init.xavier_uniform_(m.conv_im.weight, gain=1/np.sqrt(2))
                 if m.conv_re.bias is not None:
                     nn.init.zeros_(m.conv_re.bias)
                     nn.init.zeros_(m.conv_im.bias)
@@ -313,6 +314,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
         model.apply(weight_init)
     return model
 
+    
 # ------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     # logphi_model = CNNnet_1d(10,2)
@@ -324,8 +326,9 @@ if __name__ == '__main__':
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
-
-    from operators.tfim_spin2d import get_init_state
+    import sys
+    sys.path.append('..')
+    from ops.tfim_spin2d import get_init_state
     state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     #print(state0[0]) 
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
@@ -335,11 +338,5 @@ if __name__ == '__main__':
     # theta = phi[:,1].reshape(1,-1)
     print(phi[:,0].std()/phi[:,0].mean())
     print(phi[:,1].std()/phi[:,1].mean(),phi[:,1].max(), phi[:,1].min())
-    complex_init(logphi_model)
-    target_angle = np.random.uniform(-np.pi, np.pi, size=500)
-    import matplotlib.pyplot as plt
-    plt.figure()
-    plt.hist(target_angle)
-    plt.show()
-    # print(logphi)
+
 
