@@ -77,10 +77,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     updator = train_ops._updator
     buffer = SampleBuffer(gpu) 
 
-    psi_model = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
-                    **net_args).to(gpu)
+    psi_model, name_index = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
+                    **net_args)
+    psi_model.to(gpu)
 
-    mh_model = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
+    mh_model, _ = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
                     **net_args)
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))

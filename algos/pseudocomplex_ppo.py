@@ -74,10 +74,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     updator = train_ops._updator
     buffer = SampleBuffer(gpu)
 
-    psi_model = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
-                output_activation=True, **net_args).to(gpu)
+    psi_model,_ = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
+                output_activation=True, **net_args)
+    psi_model.to(gpu)
     # model for sampling
-    mh_model = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
+    mh_model,_ = mlp_cnn(state_size=state_size, output_size=2, complex_nn=False,
                 output_activation=True, **net_args)
 
     logger.info(psi_model)
@@ -206,6 +207,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     warmup_n_sample = n_sample // 10
     logger.info('mean_spin: {}'.format(MHsampler._state0_v))
     logger.info('Start training:')
+    DFS = 0
 
     for epoch in range(epochs):
         sample_tic = time.time()

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sampler.mcmc_sampler_complex import MCsampler
-from algos.core import mlp_cnn, get_paras_number, gradient
+from algos.core import mlp_cnn, mlp_cnn_sym, get_paras_number, gradient
 from utils import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
 from torch.autograd.functional import jacobian
 import scipy.io as sio
@@ -83,9 +83,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     updator = train_ops._updator
     buffer = SampleBuffer(gpu)
 
-    psi_model = mlp_cnn(state_size=state_size, complex_nn=True, **net_args).to(gpu)
+    psi_model, name_index = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
+    psi_model.to(gpu)
     # model for sampling
-    mh_model = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
+    mh_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
 
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))
@@ -149,7 +150,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
-        ops_real, ops_imag = data['ops_real'], data['ops_imag']
+        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        #ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -165,17 +167,17 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the coeffs of the energy
-        # n_sample = op_states.shape[0]
-        # n_updates = op_states.shape[1]
-        # op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        # psi_ops = model(op_states.float())
-        # logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        # theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+        n_sample = op_states.shape[0]
+        n_updates = op_states.shape[1]
+        op_states = op_states.reshape([-1, Dp]+single_state_shape)
+        psi_ops = model(op_states.float())
+        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
-        # delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        # delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        # ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
-        # ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
+        delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+        delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
+        ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
+        ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
         
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
@@ -197,7 +199,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         cE_im_im = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
         loss_im_im = 0.5*torch.max(weights*E_im_im, clip_ws*cE_im_im).sum()
 
-        return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0)
+        return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0), me_real
 
     def regular_backward(data):
         op_model = copy.deepcopy(psi_model)
@@ -205,7 +207,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         def forward(*new_param):
             load_weights(op_model, names, new_param)
-            loss = compute_loss_energy(op_model, data)
+            loss, _ = compute_loss_energy(op_model, data)
             return loss
 
         dydws = jacobian(forward, params, vectorize=True) 
@@ -213,13 +215,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         psi_model.zero_grad()
         for name, p in psi_model.named_parameters():
-            if name.split(".")[3] == 'conv_re':
+            if name.split(".")[3 + name_index] == 'conv_re':
                 p.grad = dydws[cnt][0] + dydws[cnt + 2][1]
-            elif  name.split(".")[2] == 'linear_re':
+            elif  name.split(".")[2 + name_index] == 'linear_re':
                 p.grad = dydws[cnt][0] + dydws[cnt + 1][1]
-            elif name.split(".")[3] == 'conv_im':
+            elif name.split(".")[3 + name_index] == 'conv_im':
                 p.grad = dydws[cnt - 2][2] + dydws[cnt][3]
-            elif name.split(".")[2] == 'linear_im':
+            elif name.split(".")[2 + name_index] == 'linear_im':
                 p.grad = dydws[cnt - 1][2] + dydws[cnt][3]
             else:
                 raise ValueError('Miss update layer: {}'.format(name))
@@ -232,13 +234,14 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     def update(batch_size, target):
         # full samples for small systems
-        data = buffer.get(batch_size=batch_size, get_eops=True)
+        data = buffer.get(batch_size=batch_size, get_eops=False)
         # off-policy update
         for i in range(n_optimize):
             # random batch for large systems
             # data = buffer.get(batch_size=batch_size, batch_type='rand', get_energy_ops)
             optimizer.zero_grad()
             dfs = get_fubini_study_distance(data)
+            _, me = compute_loss_energy(psi_model,data)
             if dfs > target:
                 logger.warning(
                     'early stop at step={} as reaching maximal FS distance'.format(i))
@@ -247,7 +250,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             regular_backward(data)
             optimizer.step()
 
-        return dfs
+        return dfs, me
 
     # ----------------------------------------------------------------
     tic = time.time()
@@ -282,7 +285,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
         thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
-        buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
+        #buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
 
@@ -290,7 +293,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        DFS = update(IntCount, target)
+        DFS, ME = update(IntCount, target)
         op_toc = time.time()
 
         sd = 1 if IntCount < batch_size else sample_division
@@ -309,8 +312,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
         # print training informaition
-        logger.info('Epoch: {}, AvgE: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
-                    format(epoch, AvgE/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
+        logger.info('Epoch: {}, AvgE: {:.5f}, ME: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
+                    format(epoch, AvgE/TolSite, ME/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:

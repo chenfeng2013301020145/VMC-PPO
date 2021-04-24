@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sampler.mcmc_sampler_complex import MCsampler
-from algos.core import mlp_cnn, get_paras_number, gradient
+from algos.core import mlp_cnn, mlp_cnn_sym, get_paras_number, gradient
 from utils import SampleBuffer, get_logger, _get_unique_states
 import scipy.io as sio
 import copy
@@ -25,9 +25,9 @@ class train_Ops:
 # ------------------------------------------------------------------------
 def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=dict(),
     Ham_args=dict(), learning_rate=1E-3, n_sample=1000, init_type='rand', threads=4,
-    batch_size = 1000, state_size=[10,10,2], input_mh_fn=0, load_state0=True, 
+    batch_size = 1000, state_size=[10,10,2], input_mh_fn=0, load_state0=True,
     output_fn='test', seed=0):
-    
+
     seed += 1000*np.sum(np.arange(threads))
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -40,8 +40,9 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
 
-    small_model = mlp_cnn(state_size=state_size, **small_net_args).to(gpu)
-    mh_model = mlp_cnn(state_size=state_size, **small_net_args)
+    small_model, _ = mlp_cnn_sym(state_size=state_size, **small_net_args)
+    small_model.to(gpu)
+    mh_model, _ = mlp_cnn_sym(state_size=state_size, **small_net_args)
     print('original_model:')
     print(mh_model)
     print(get_paras_number(mh_model))
@@ -52,13 +53,14 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
     if input_mh_fn != 0:
         load_model = torch.load(os.path.join('./results', input_mh_fn))
         small_model.load_state_dict(load_model)
-        # theta_model.load_state_dict(load_models['theta_model']) 
+        # theta_model.load_state_dict(load_models['theta_model'])
         if load_state0:
             fn_name = os.path.split(os.path.split(input_mh_fn)[0])
             mat_content = sio.loadmat(os.path.join('./results',fn_name[0], 'state0.mat'))
             MHsampler.single_state0 = mat_content['state0']
 
-    big_model = mlp_cnn(state_size=state_size, **big_net_args).to(gpu)
+    big_model, _ = mlp_cnn_sym(state_size=state_size, **big_net_args)
+    big_model.to(gpu)
     print('transferred_to:')
     print(big_model)
     print(get_paras_number(big_model))
@@ -66,23 +68,23 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
     buffer = SampleBuffer(gpu)
     optimizer = torch.optim.Adam(big_model.parameters(), lr=learning_rate)
     # loss_func = torch.nn.SmoothL1Loss()
-    
+
     def get_fubini_study_distance(data):
         state, count, logphi0, theta0  = data['state'], data['count'], data['logphi0'], data['theta0']
 
         psi = big_model(state.float())
         logphi = psi[:, 0].reshape(len(state), -1)
         theta = psi[:, 1].reshape(len(state), -1)
-        
+
         deltalogphi = logphi - logphi0[...,None].detach()
         deltalogphi = deltalogphi - deltalogphi.mean()
         deltatheta = theta - theta0[...,None].detach()
-        
+
         phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()
         phinew_phiold = phiold_phinew.conj()
         phiold_phiold = count.sum()
         phinew_phinew = (count[...,None]*torch.exp(2*deltalogphi)).sum()
-        
+
         fsd = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
         return fsd.abs()
 
@@ -107,7 +109,7 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
         for _ in range(100):
             data = buffer.get(batch_type='rand',batch_size=batch_size)
             optimizer.zero_grad()
-            
+
             loss = get_fubini_study_distance(data)
             #loss = loss_func(pred_psi, psi)
             # loss = MSE_loss(pred_logphis, logphis, pred_thetas, thetas, count)
@@ -131,24 +133,24 @@ if __name__ =='__main__':
     import torch.nn as nn
     from utils import decimalToAny
 
-    state_size = [4, 3, 2]
+    state_size = [2, 3, 2]
     TolSite = state_size[0]*state_size[1]
     Ops_args = dict(hamiltonian=Heisenberg2DTriangle, get_init_state=get_init_state, updator=updator)
     Ham_args = dict(state_size=state_size, pbc=True)
-    net_args = dict(K=3, F=[5,4,3], complex_nn=True, relu_type='softplus2')
-    mh_net_args = dict(K=3, F=[4,2], complex_nn=True, relu_type='softplus2')
-    input_mh_fn = 'HS_2d_tri_L3W3_vmcppo/save_model/model_499.pkl'
+    net_args = dict(K=2, F=[3,2], complex_nn=True, relu_type='softplus2')
+    mh_net_args = dict(K=2, F=[3], complex_nn=True, relu_type='softplus2')
+    input_mh_fn = 'HS_2d_tri_L2W2_vmcppo/save_model/model_99.pkl'
     # input_fn = 'HS_2d_sq_L3W2/save_model/model_199.pkl'
-    output_fn ='HS_2d_tri_L4W3_vmcppo_TL'
+    output_fn ='HS_2d_tri_L2W3_vmcppo'
 
-    trained_model, state0 = transfer(epochs=100, small_net_args=mh_net_args, big_net_args=net_args, Ops_args=Ops_args,
-            Ham_args=Ham_args, learning_rate=1E-4, n_sample=70000, init_type='rand', threads=35, seed=181,
+    trained_model, state0 = transfer(epochs=50, small_net_args=mh_net_args, big_net_args=net_args, Ops_args=Ops_args,
+            Ham_args=Ham_args, learning_rate=1E-4, n_sample=7000, init_type='rand', threads=35, seed=898,
             state_size=state_size, input_mh_fn=input_mh_fn, load_state0=False, output_fn=output_fn)
-    
+
     calculate_op = cal_op(state_size=state_size, psi_model=trained_model,
-            state0=state0, n_sample=70000, updator=updator,
+            state0=state0, n_sample=7000, updator=updator,
             get_init_state=get_init_state, threads=35, sample_division=10)
-    
+
     meane, stde, IntCount = calculate_op.get_value(operator=Heisenberg2DTriangle, op_args=Ham_args)
     print([meane/TolSite, stde/TolSite, IntCount])
 
@@ -175,11 +177,11 @@ if __name__ =='__main__':
             state_onehots[i] = torch.from_numpy(value2onehot(state, Dp))
 
         psi = torch.squeeze(trained_model(state_onehots.float())).detach().numpy()
-        logphis = psi[:,0]
+        logphis = psi[:,0] - psi[:,0].mean()
         thetas = psi[:,1]
         probs = np.exp(logphis*2)/np.sum(np.exp(logphis*2))
         print(np.sum(probs))
 
-        sio.savemat('./data/test_data_HS2dtri_L4W3TL.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
+        sio.savemat('./tests/data/test_data_HS2dtri_L4W3TL.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
     b_check()

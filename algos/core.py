@@ -213,8 +213,8 @@ class ComplexReLU(nn.Module):
 # COMPLEX CNN
 #--------------------------------------------------------------------
 class CNN_complex_layer(nn.Module):
-    def __init__(self,K,F_in,F_out,layer_name='mid',
-                 relu_type='sReLU',pbc=True, bias=True, dimensions='1d'):
+    def __init__(self,K,F_in,F_out,layer_name='mid',relu_type='sReLU',
+                 pbc=True, bias=True, dimensions='1d'):
         """
         Dp = 1: value encoding
         Dp > 1: onehot encoding
@@ -252,7 +252,7 @@ class OutPut_complex_layer(nn.Module):
     
     def forward(self,x):
         x = complex_sym_padding(x, dimensions=self.dimensions)
-        # shape of complex x: (batch_size, 2, F, N)
+        # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
         # norm = np.sqrt(np.prod(x.shape[3:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
@@ -264,6 +264,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
     dim = len(state_size) - 1
     dimensions = '1d' if dim == 1 else '2d'
     layers = len(F)
+    name_index = 0
     if complex_nn:
         Dp = state_size[-1]
 
@@ -312,7 +313,29 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
-    return model
+    return model, name_index
+
+# physical symmetry 
+# -------------------------------------------------------------------------------------------------
+class sym_model(nn.Module):
+    def __init__(self, state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True):
+        super(sym_model,self).__init__()
+        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
+                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
+        
+    def forward(self,x):
+        # input shape: (batch, Dp, N) or (batch, Dp, L, W)
+        x_inverse = torch.flip(x, dims=[1])
+        x = self.model(x)/np.sqrt(2) + self.model(x_inverse)/np.sqrt(2)
+        return x
+
+def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True):
+    model = sym_model(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
+                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
+    name_index = 1
+    return model, name_index
 
     
 # ------------------------------------------------------------------------------------------------
@@ -321,7 +344,7 @@ if __name__ == '__main__':
     seed = 10086
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True,
+    logphi_model, _ = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
@@ -330,7 +353,8 @@ if __name__ == '__main__':
     sys.path.append('..')
     from ops.tfim_spin2d import get_init_state
     state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
-    #print(state0[0]) 
+    print(state0[0]) 
+    print(torch.flip(torch.from_numpy(state0[0]), dims=[0]))
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
 
     phi = logphi_model(torch.from_numpy(state0).float())
@@ -338,5 +362,9 @@ if __name__ == '__main__':
     # theta = phi[:,1].reshape(1,-1)
     print(phi[:,0].std()/phi[:,0].mean())
     print(phi[:,1].std()/phi[:,1].mean(),phi[:,1].max(), phi[:,1].min())
-
+    
+    logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [3,2],complex_nn=True,
+                           output_size=2, relu_type='softplus2', bias=True)
+    phi = logphi_model_sym(torch.from_numpy(state0).float())
+    print(get_paras_number(logphi_model_sym))
 
