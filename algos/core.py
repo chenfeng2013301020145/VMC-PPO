@@ -44,6 +44,77 @@ def complex_sym_padding(x, dimensions):
         x = torch.cat((x, x[:,:,:,0:1,:]), -2)
         x = torch.cat((x, x[:,:,:,:,0:1]), -1)
         return x
+    
+def translation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
+    dimension = len(x.shape) - 2
+    if dimension == 1:
+        '''
+        z = x.clone()
+        N = x.shape[-1]
+        Dp = x.shape[1]
+        pow_list = torch.pow(2,torch.arange(N-1, -1, -1, device=device))
+        x = x.reshape(x.shape[0],1, Dp, N)
+        x_roll_total = x.clone()
+        index_total = (x[:,0,-1,:]*pow_list[None,...]).sum(dim=1)[...,None]
+        for i in range(N - 1):
+            x_roll_single = torch.roll(x, shifts=i+1, dims=3)
+            index = (x_roll_single[:,0,-1,:]*pow_list[None,...]).sum(dim=1)[...,None]
+            x_roll_total = torch.cat((x_roll_total, x_roll_single), dim=1)
+            index_total = torch.cat((index_total, index), dim=1)
+        # shape of x_roll: (batch_size, N, Dp, N)
+        label = torch.argmax(index_total, dim=1)
+        for i in range(x.shape[1]):
+            z[i,:,:] = x_roll_total[i,label[i],:,:]
+        return z, N - 1
+        '''
+        N = x.shape[-1]
+        Dp = x.shape[1]
+        x = x.reshape(x.shape[0],1, Dp, N)
+        x_roll_total = x.clone()
+        for i in range(N - 1):
+            x_roll_single = torch.roll(x, shifts=i+1, dims=3)
+            x_roll_total = torch.cat((x_roll_total, x_roll_single), dim=1)
+        # shape of x_roll: (batch_size, N, Dp, N)
+        x = x_roll_total.reshape(-1, Dp, N)
+        return x, N - 1
+    else:
+        '''
+        z = x.clone()
+        L = x.shape[-2]
+        W = x.shape[-1]
+        Dp = x.shape[1]
+        pow_list = torch.pow(2,torch.arange(L*W-1, -1, -1, device=device))
+        x = x.reshape(x.shape[0],1, Dp, L, W)
+        l, w = np.meshgrid(range(L), range(W))
+        l = l.reshape(-1)[1:]
+        w = w.reshape(-1)[1:]
+        x_roll_total = x.clone()
+        index_total = (x[:,0,-1,:,:].reshape(x.shape[0], -1)*pow_list[None,...]).sum(dim=1)[...,None]
+        for dx, dy in zip(l, w):
+            x_roll_single = torch.roll(x, shifts=[dx, dy], dims=[3, 4])
+            index = (x_roll_single[:,0,-1,:,:].reshape(x.shape[0], -1)*pow_list[None,...]).sum(dim=1)[...,None]
+            x_roll_total = torch.cat((x_roll_total, x_roll_single), dim=1)
+            index_total = torch.cat((index_total, index), dim=1)
+        # shape of x_roll: (batch_size, L*W, Dp, L, W)
+        label = torch.argmax(index_total, dim=1)
+        for i in range(x.shape[1]):
+            z[i,:,:,:] = x_roll_total[i,label[i],:,:,:] 
+        ''' 
+        L = x.shape[-2]
+        W = x.shape[-1]
+        Dp = x.shape[1]
+        x = x.reshape(x.shape[0],1, Dp, L, W)
+        l, w = np.meshgrid(range(L), range(W))
+        l = l.reshape(-1)[1:]
+        w = w.reshape(-1)[1:]
+        x_roll_total = x.clone()
+        for dx, dy in zip(l, w):
+            x_roll_single = torch.roll(x, shifts=[dx, dy], dims=[3, 4])
+            x_roll_total = torch.cat((x_roll_total, x_roll_single), dim=1)
+        # shape of x_roll: (batch_size, L*W, Dp, L, W)
+        x = x_roll_total.reshape(-1, Dp, L, W)
+        return x, L*W - 1 
 
 def get_paras_number(net):
     total_num = sum(p.numel() for p in net.parameters())
@@ -324,14 +395,24 @@ class sym_model(nn.Module):
         super(sym_model,self).__init__()
         self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
-        
-    def forward(self,x):
-        # input shape: (batch, Dp, N) or (batch, Dp, L, W)
-        x_inverse = torch.flip(x, dims=[1])
-        norm = 2
-        z = (self.model(x) + self.model(x_inverse))/norm
-        x[:,0] = z[:,0]
-        x[:,1] = x[:,1]
+    
+    # inverse symmetry
+    # def forward(self,x):
+    #     # input shape: (batch, Dp, N) or (batch, Dp, L, W)
+    #     x_inverse = torch.flip(x, dims=[1])
+    #     norm = 2
+    #     z = (self.model(x) + self.model(x_inverse))/norm
+    #     x[:,0] = z[:,0]
+    #     x[:,1] = x[:,1]
+    #     return x
+    
+    # translation symmetry
+    def forward(self, x):
+        trans_x, N = translation(x)
+        trans_x = self.model(trans_x)
+        x = self.model(x)
+        trans_x = trans_x.reshape(x.shape[0], N+1, x.shape[1]).mean(dim=1)
+        x[:,0] = trans_x[:,0]
         return x
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
@@ -355,20 +436,21 @@ if __name__ == '__main__':
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
-    from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
+    from ops.tfim_spin2d import get_init_state
+    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     print(state0[0]) 
-    print(torch.flip(torch.from_numpy(state0[0]), dims=[1,2]))
+    print(state0.shape)
+    x, M = translation(torch.from_numpy(state0))
+    print(x.shape)
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
 
-    phi = logphi_model(torch.from_numpy(state0).float())
-    # logphi = phi[:,0].reshape(1,-1)
-    # theta = phi[:,1].reshape(1,-1)
-    print(phi[:,0].std()/phi[:,0].mean())
-    print(phi[:,1].std()/phi[:,1].mean(),phi[:,1].max(), phi[:,1].min())
+    # phi = logphi_model(torch.from_numpy(state0).float())
+    # # logphi = phi[:,0].reshape(1,-1)
+    # # theta = phi[:,1].reshape(1,-1)
+    # print(phi[:,0].std()/phi[:,0].mean())
+    # print(phi[:,1].std()/phi[:,1].mean(),phi[:,1].max(), phi[:,1].min())
     
-    logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [3,2],complex_nn=True,
-                           output_size=2, relu_type='softplus2', bias=True)
-    phi = logphi_model_sym(torch.from_numpy(state0).float())
-    print(get_paras_number(logphi_model_sym))
-
+    # logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [3,2],complex_nn=True,
+    #                        output_size=2, relu_type='softplus2', bias=True)
+    # phi = logphi_model_sym(torch.from_numpy(state0).float())
+    # print(get_paras_number(logphi_model_sym))

@@ -53,13 +53,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         learning_rate: learning rate for Adam.
 
-        state_size: size of a single state, [n_sites, Dp].
+        state_size: size of a single state, (N, Dp) or (L, W, Dp).
 
         save_freq: frequency of saving.
 
         Dp: physical index.
 
-        N or L, W: length of 1d lattice or length and with of 2d lattice
+        N or L, W: length of 1d lattice or length, with of 2d lattice
     """
     seed += 1000*np.sum(np.arange(threads))
     torch.manual_seed(seed)
@@ -144,8 +144,19 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             phiold_phiold = count.sum()
             phinew_phinew = (count[...,None]*torch.exp(2*deltalogphi)).sum()
             
-            fsd = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
-        return fsd.abs()**2
+            dfs = torch.acos(torch.sqrt(phiold_phinew*phinew_phiold/phiold_phiold/phinew_phinew))
+        return dfs.abs()**2
+    
+    def target_fubini_study_distance(EGE, AvgE, AvgE2, tau):
+        EG = min(-0.5, EGE)*TolSite
+        AvgE = AvgE - EG
+        AvgE2 = AvgE2 - 2*EG*AvgE + EG**2
+        with torch.no_grad():
+            phiold_phinew = 1 - tau*AvgE
+            phiold_phiold = 1
+            phinew_phinew = 1 - 2*tau*AvgE + tau**2*AvgE2
+            dfs = np.arccos(np.sqrt(phiold_phinew**2/phiold_phiold/phinew_phinew))
+        return dfs**2
     
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
@@ -258,19 +269,21 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     logger.info('Start training:')
     MHsampler.basis_warmup_sample = 10*threads
     DFS = 0
+    TDFS = target_dfs
 
     for epoch in range(epochs):
         sample_tic = time.time()
         if epoch > epochs - 100:
-            target = 0.5*target_dfs
+            target = min(target_dfs, TDFS)
+            n_optimize = 20
         else:
-            target = target_dfs
+            target = min(target_dfs, TDFS)
         # sync parameters
         MHsampler._model.load_state_dict(psi_model.state_dict())
         if epoch == 0:
             MHsampler.first_warmup()
         # update the mh_model
-        if DFS > 2*target_dfs:
+        if DFS > 2*target:
             MHsampler._warmup = True
         else:
             MHsampler._warmup = False
@@ -312,9 +325,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         # adjust the learning rate
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
+        EGE = AvgE/TolSite - StdE
+        TDFS = target_fubini_study_distance(EGE, AvgE, AvgE2, lr*n_optimize)
         # print training informaition
-        logger.info('Epoch: {}, AvgE: {:.5f}, ME: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
-                    format(epoch, AvgE/TolSite, ME/TolSite, StdE, lr/learning_rate, DFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
+        logger.info('Epoch: {}, AvgE: {:.5f}, ME: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, TDFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
+                    format(epoch, AvgE/TolSite, ME/TolSite, StdE, lr/learning_rate, DFS, TDFS, IntCount, sample_toc-sample_tic, op_toc-op_tic, time.time()-tic))
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
