@@ -256,6 +256,7 @@ class OutPut_complex_layer(nn.Module):
         # norm = np.sqrt(np.prod(x.shape[3:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
+        x[:,1] = torch.fmod(x[:,1], 2*np.pi) - np.pi
         return x
     
 #--------------------------------------------------------------------
@@ -327,7 +328,10 @@ class sym_model(nn.Module):
     def forward(self,x):
         # input shape: (batch, Dp, N) or (batch, Dp, L, W)
         x_inverse = torch.flip(x, dims=[1])
-        x = self.model(x)/np.sqrt(2) + self.model(x_inverse)/np.sqrt(2)
+        norm = 2
+        z = (self.model(x) + self.model(x_inverse))/norm
+        x[:,0] = z[:,0]
+        x[:,1] = x[:,1]
         return x
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
@@ -344,17 +348,17 @@ if __name__ == '__main__':
     seed = 10086
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn([4,4,2], 2, [3,2],complex_nn=True,
+    logphi_model, _ = mlp_cnn([3,3,2], 2, [3,2],complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
-    from ops.tfim_spin2d import get_init_state
-    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
+    from ops.HS_spin2d import get_init_state
+    state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
     print(state0[0]) 
-    print(torch.flip(torch.from_numpy(state0[0]), dims=[0]))
+    print(torch.flip(torch.from_numpy(state0[0]), dims=[1,2]))
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
 
     phi = logphi_model(torch.from_numpy(state0).float())

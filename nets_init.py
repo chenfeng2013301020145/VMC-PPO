@@ -39,8 +39,8 @@ def random_train(epochs=100, net_args=dict(), Ops_args=dict(), seed=0, batch_siz
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
 
-    model = mlp_cnn(state_size=state_size, complex_nn=True, **net_args).to(gpu)
-    mh_model = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
+    model, _ = mlp_cnn(state_size=state_size, complex_nn=True, **net_args).to(gpu)
+    mh_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
     print(model)
     print(get_paras_number(model))
 
