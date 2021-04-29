@@ -138,6 +138,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             deltalogphi = logphi - logphi0[...,None]
             deltalogphi = deltalogphi - deltalogphi.mean()
             deltatheta = theta - theta0[...,None]
+            deltatheta = deltatheta - deltatheta.mean()
             
             phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()
             phinew_phiold = phiold_phinew.conj()
@@ -161,8 +162,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
-        #op_states, op_coeffs = data['update_states'], data['update_coeffs']
-        ops_real, ops_imag = data['ops_real'], data['ops_imag']
+        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        # ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -178,17 +179,17 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the coeffs of the energy
-        # n_sample = op_states.shape[0]
-        # n_updates = op_states.shape[1]
-        # op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        # psi_ops = model(op_states.float())
-        # logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        # theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+        n_sample = op_states.shape[0]
+        n_updates = op_states.shape[1]
+        op_states = op_states.reshape([-1, Dp]+single_state_shape)
+        psi_ops = model(op_states.float())
+        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
-        # delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        # delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        # ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
-        # ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
+        delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+        delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
+        ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
+        ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
         
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
@@ -245,7 +246,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
     def update(batch_size, target):
         # full samples for small systems
-        data = buffer.get(batch_size=batch_size, get_eops=True)
+        data = buffer.get(batch_size=batch_size, get_eops=False)
         # off-policy update
         for i in range(n_optimize):
             # random batch for large systems
@@ -288,7 +289,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         else:
             MHsampler._warmup = False
 
-        states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
+        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
 
         # using unique states to reduce memory usage.
@@ -299,7 +300,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
         thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
-        buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
+        # buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
 

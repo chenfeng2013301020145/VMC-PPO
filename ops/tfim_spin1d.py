@@ -21,7 +21,7 @@ def get_init_state(state_size,kind='rand',n_size=1):
             state[:,0, i] = 1
             state[:,-1, i + N//2] = 1
 
-    return state, 0
+    return state, None
 
 def onehot2value(state, Dp): 
     state_v = np.arange(0,Dp).reshape(Dp,1)*np.squeeze(state)

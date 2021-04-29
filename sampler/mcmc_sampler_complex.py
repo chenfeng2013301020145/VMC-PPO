@@ -142,7 +142,7 @@ class MCsampler():
         return (state_sample_per_thread, logphi_sample_per_thread,
                 us_sample_per_thread, uc_sample_per_thread)
 
-    def parallel_mh_sampler(self):
+    def get_new_samples(self):
         """
         Returns:
             Sample states: state_list

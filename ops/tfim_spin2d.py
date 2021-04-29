@@ -15,11 +15,11 @@ def get_init_state(state_size, kind='rand', n_size=1):
 
     if kind == 'rand':
         state_v = np.random.randint(0, Dp, size=(n_size, L, W))
-        X, Y = np.meshgrid(range(L), range(W))
+        X, Y = np.meshgrid(range(W), range(L))
         for i in range(n_size):
             state[i,state_v[i],Y,X] = 1
 
-    return state, 0
+    return state, None
 
 def onehot2value(state, Dp): 
     state_v = np.arange(0,Dp).reshape(Dp,1,1)*np.squeeze(state)

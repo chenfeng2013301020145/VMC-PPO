@@ -131,6 +131,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
             deltalogphi = logphi - logphi0[...,None]
             deltalogphi = deltalogphi - deltalogphi.mean()
             deltatheta = theta - theta0[...,None]
+            deltatheta = deltatheta - deltatheta.mean()
             
             phiold_phinew = (count[...,None]*torch.exp(deltalogphi)*torch.exp(1j*deltatheta)).sum()
             phinew_phiold = phiold_phinew.conj()
@@ -220,7 +221,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         else:
             MHsampler._warmup = False
             
-        states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
+        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
 
         # using unique states to reduce memory usage.

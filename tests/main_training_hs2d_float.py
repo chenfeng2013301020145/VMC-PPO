@@ -8,6 +8,7 @@ import torch.nn as nn
 from updators.state_swap_updator import updator
 from ops.HS_spin2d import Heisenberg2DSquare, get_init_state, value2onehot
 from algos.complex_ppo import train
+from algos.core import translation, reflection, inverse
 from ops.operators import cal_op, Sz, Sx, SzSz
 import os
 import argparse
@@ -25,7 +26,7 @@ parser.add_argument('--lattice_length',type=int, default=10)
 parser.add_argument('--lattice_width',type=int, default=10)
 parser.add_argument('--Dp', type=int, default=2)
 parser.add_argument('--threads', type=int, default=4)
-parser.add_argument('--kernels', type=int, default=3)
+parser.add_argument('--kernels', nargs='+', type=int, default=[3])
 parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
 parser.add_argument('--dfs', type=float, default=10)
 args = parser.parse_args()
@@ -34,7 +35,7 @@ state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=Heisenberg2DSquare, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2')
+net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2', sym_func=translation)
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
 output_fn ='HS_2d_sq_L3W2_vmcppo'

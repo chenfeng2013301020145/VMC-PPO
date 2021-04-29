@@ -256,12 +256,13 @@ class OutPut_complex_layer(nn.Module):
         # norm = np.sqrt(np.prod(x.shape[3:]))
         x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         x = self.linear(x).squeeze(-1)
-        x[:,1] = torch.fmod(x[:,1], 2*np.pi) - np.pi
+        # x[:,1] = torch.fmod(x[:,1], np.pi)
         return x
     
 #--------------------------------------------------------------------
 def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, inverse_sym=False, relu_type='sReLU', pbc=True, bias=True):
+    K = K[0] if type(K) is list and len(K) == 1 else K
     dim = len(state_size) - 1
     dimensions = '1d' if dim == 1 else '2d'
     layers = len(F)
@@ -358,6 +359,9 @@ def inverse(x):
     else:
         return torch.stack((x, x_inverse), dim=1).reshape(-1, x.shape[1], x.shape[2], x.shape[3]), N
 
+def identity(x):
+    return x, 1
+
 def reflection(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     dimension = len(x.shape) - 2
@@ -374,7 +378,7 @@ def reflection(x):
     
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=translation):
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
         super(sym_model,self).__init__()
         self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
@@ -390,7 +394,7 @@ class sym_model(nn.Module):
         return x
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=translation):
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
     model = sym_model(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, sym_func=sym_func)
     name_index = 1
