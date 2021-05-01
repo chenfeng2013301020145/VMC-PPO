@@ -38,6 +38,7 @@ class SampleBuffer:
         theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi[...,None]*torch.ones_like(logphi_ops)
+        delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.5*n_sample))
         delta_theta_os = theta_ops - theta[...,None]*torch.ones_like(theta_ops)
         op_coeffs = torch.from_numpy(self.update_coeffs).to(self._device)
         self.ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)

@@ -148,8 +148,8 @@ class ComplexLinear(nn.Module):
         self.linear_im = nn.Linear(in_features, out_features, bias=bias)
         
     def forward(self, x): # shpae of x : [batch,2,in_features]
-        real = self.linear_re(x[:,0]) - self.linear_im(x[:,1])
-        imaginary = self.linear_re(x[:,1]) + self.linear_im(x[:,0])
+        real = self.linear_re(x[:,0])
+        imaginary = self.linear_im(x[:,1])
         output = torch.stack((real, imaginary),dim=1)
         return output
 
@@ -248,16 +248,22 @@ class OutPut_complex_layer(nn.Module):
         self.F = F
         self._pbc=pbc
         self.dimensions = dimensions
-        self.linear = ComplexLinear(F,1, bias=False)
+        #self.linear = ComplexLinear(F,1, bias=False)
     
     def forward(self,x):
-        x = complex_sym_padding(x, dimensions=self.dimensions)
+        #x = complex_sym_padding(x, dimensions=self.dimensions)
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
         # norm = np.sqrt(np.prod(x.shape[3:]))
-        x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
-        x = self.linear(x).squeeze(-1)
+        real = x[:,0]
+        imag = x[:,1]
+        imag = sym_padding(imag, dimensions=self.dimensions)
+        real = real.sum(2) if self.dimensions=='1d' else real.sum(dim=[2,3])
+        imag = imag.sum(2) if self.dimensions=='1d' else imag.sum(dim=[2,3])
+        x = torch.stack((real, imag), dim=1)
+        # x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
+        # x = self.linear(x).squeeze(-1)
         # x[:,1] = torch.fmod(x[:,1], np.pi)
-        return x
+        return x.sum(-1)
     
 #--------------------------------------------------------------------
 def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
@@ -353,11 +359,7 @@ def inverse(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     N = 2
     x_inverse = torch.flip(x, dims=[1])
-    dimension = len(x.shape) - 2
-    if dimension == 1:
-        return torch.stack((x, x_inverse), dim=1).reshape(-1, x.shape[1], x.shape[2]), N
-    else:
-        return torch.stack((x, x_inverse), dim=1).reshape(-1, x.shape[1], x.shape[2], x.shape[3]), N
+    return torch.stack((x, x_inverse), dim=1).reshape([-1] + list(x.shape[1:])), N
 
 def identity(x):
     return x, 1
@@ -368,13 +370,13 @@ def reflection(x):
     if dimension == 1:
         N = 2
         x_flr = torch.flip(x, dims=[2])
-        return torch.stack((x, x_flr), dim=1).reshape(-1, x.shape[1], x.shape[2]), N
+        return torch.stack((x, x_flr), dim=1).reshape([-1] + list(x.shape[1:])), N
     else:
         N = 4
         x_flr = torch.flip(x, dims=[2])
         x_fud = torch.flip(x, dims=[3])
         x_flrud = torch.flip(x, dims=[2,3])
-        return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape(-1, x.shape[1], x.shape[2], x.shape[3]), N
+        return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
@@ -407,7 +409,7 @@ if __name__ == '__main__':
     seed = 10086
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn([3,3,2], 2, [3,2],complex_nn=True,
+    logphi_model, _ = mlp_cnn([4,4,2], 2, [3, 2],complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
@@ -418,8 +420,13 @@ if __name__ == '__main__':
     state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     print(state0[0]) 
     print(state0.shape)
-    x, M = translation(torch.from_numpy(state0))
-    print(x.shape)
+    print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
+    state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=2)
+    print(state_t)
+    print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
+    print(list(logphi_model(torch.from_numpy(state0).float()).size()))
+    x, M = reflection(torch.from_numpy(state0))
+    #print(x.shape)
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
 
     # phi = logphi_model(torch.from_numpy(state0).float())

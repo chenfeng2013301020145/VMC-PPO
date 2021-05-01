@@ -29,9 +29,9 @@ class train_Ops:
 
 # ------------------------------------------------------------------------
 # main training function
-def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type='rand', n_optimize=10,
+def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=3000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.1, save_freq=10, net_args=dict(), threads=4, seed=0,
+          sample_division=5, target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, seed=0,
           input_fn=0, load_state0=True, output_fn='test'):
     """
     main training process
@@ -188,6 +188,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
+        # delta_theta_os = torch.fmod(delta_logphi_os, np.pi)
         ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
         ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
         
