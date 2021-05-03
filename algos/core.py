@@ -15,34 +15,27 @@ def periodic_padding(x, kernel_size, dimensions):
         x = torch.cat((x, x[:,:,:,0:kernel_size[1]-1]), -1)
         return x
 
-def complex_periodic_padding(x, kernel_size, dimensions):
+def complex_periodic_padding(x, kernel_size, stride, dimensions):
     if dimensions == '1d':
+        N = x.shape[-1]
+        pN = (stride - 1)*N + (kernel_size - 1) - stride + 1
         # shape of complex x: (batch_size, 2, Dp, N)
-        return torch.cat((x, x[:,:,:,0:kernel_size-1]), -1)
+        for _ in range(pN // N):
+            x = torch.cat((x, x), -1)
+        return torch.cat((x, x[:,:,:,0:(pN%N)]), -1)
     else:
         # shape of complex x: (batch_size, 2, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,:,0:kernel_size[0]-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,:,0:kernel_size[1]-1]), -1)
-        return x
-    
-def sym_padding(x, dimensions):
-    if dimensions == '1d':
-        # shape of complex x: (batch_size, Dp, N)
-        return torch.cat((x, x[:,:,0:1]), -1)
-    else:
-        # shape of complex x: (batch_size, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,0:1,:]), -2)
-        x = torch.cat((x, x[:,:,:,0:1]), -1)
-        return x
-
-def complex_sym_padding(x, dimensions):
-    if dimensions == '1d':
-        # shape of complex x: (batch_size, 2, Dp, N)
-        return torch.cat((x, x[:,:,:,0:1]), -1)
-    else:
-        # shape of complex x: (batch_size, 2, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,:,0:1,:]), -2)
-        x = torch.cat((x, x[:,:,:,:,0:1]), -1)
+        L = x.shape[-2]
+        W = x.shape[-1]
+        pL = (stride[0] - 1)*L + (kernel_size[0] - 1) - stride[0] + 1
+        for _ in range(pL // L):
+            x = torch.cat((x, x), -2)
+        x = torch.cat((x, x[:,:,:,0:(pL%L),:]), -2)
+        
+        pW = (stride[1] - 1)*W + (kernel_size[1] - 1) - stride[1] + 1
+        for _ in range(pW // W):
+            x = torch.cat((x, x), -1)
+        x = torch.cat((x, x[:,:,:,:,0:(pW%W)]), -1)
         return x
     
 def get_paras_number(net):
@@ -213,7 +206,7 @@ class ComplexReLU(nn.Module):
 # COMPLEX CNN
 #--------------------------------------------------------------------
 class CNN_complex_layer(nn.Module):
-    def __init__(self,K,F_in,F_out,layer_name='mid',relu_type='sReLU',
+    def __init__(self,K,F_in,F_out,stride,layer_name='mid',relu_type='sReLU',
                  pbc=True, bias=True, dimensions='1d'):
         """
         Dp = 1: value encoding
@@ -224,16 +217,20 @@ class CNN_complex_layer(nn.Module):
         self._pbc = pbc
         self.layer_name = layer_name
         self.dimensions = dimensions
+        self.stride = [stride, stride] if type(stride) is int else stride
         
         complex_relu = ComplexReLU(relu_type)
-        complex_conv = ComplexConv(F_in,F_out,self.K,1,0, dimensions=dimensions, bias=bias)
+        if pbc:
+            complex_conv = ComplexConv(F_in,F_out,self.K,stride,0, dimensions=dimensions, bias=bias)
+        else:
+            complex_conv = ComplexConv(F_in,F_out,self.K,stride,1, dimensions=dimensions, bias=bias)
         self.conv = nn.Sequential(*[complex_conv, complex_relu])
 
     def forward(self, x):
         if self.layer_name == '1st':
             x = torch.stack((x, torch.zeros_like(x)), dim=1)
         if self._pbc:
-            x = complex_periodic_padding(x, self.K, dimensions=self.dimensions)
+            x = complex_periodic_padding(x, self.K, self.stride, dimensions=self.dimensions)
         x = self.conv(x)
         return x
 
@@ -251,24 +248,18 @@ class OutPut_complex_layer(nn.Module):
         #self.linear = ComplexLinear(F,1, bias=False)
     
     def forward(self,x):
-        #x = complex_sym_padding(x, dimensions=self.dimensions)
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
-        # norm = np.sqrt(np.prod(x.shape[3:]))
-        real = x[:,0]
-        imag = x[:,1]
-        imag = sym_padding(imag, dimensions=self.dimensions)
-        real = real.sum(2) if self.dimensions=='1d' else real.sum(dim=[2,3])
-        imag = imag.sum(2) if self.dimensions=='1d' else imag.sum(dim=[2,3])
-        x = torch.stack((real, imag), dim=1)
-        # x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
+        x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
         # x = self.linear(x).squeeze(-1)
         # x[:,1] = torch.fmod(x[:,1], np.pi)
-        return x.sum(-1)
+        x = x.sum(-1)
+        return x
     
 #--------------------------------------------------------------------
-def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
+def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, inverse_sym=False, relu_type='sReLU', pbc=True, bias=True):
     K = K[0] if type(K) is list and len(K) == 1 else K
+    stride = stride[0] if type(stride) is list and len(stride) == 1 else stride
     dim = len(state_size) - 1
     dimensions = '1d' if dim == 1 else '2d'
     layers = len(F)
@@ -276,13 +267,13 @@ def mlp_cnn(state_size, K, F=[4,3,2], output_size=1, output_activation=False, ac
     if complex_nn:
         Dp = state_size[-1]
 
-        input_layer = CNN_complex_layer(K=K, F_in=Dp, F_out=F[0], layer_name='1st', dimensions=dimensions,
+        input_layer = CNN_complex_layer(K=K, F_in=Dp, F_out=F[0], stride=stride, layer_name='1st', dimensions=dimensions,
                                         relu_type=relu_type, pbc=pbc, bias=bias)
         output_layer = OutPut_complex_layer(K,F[-1], pbc=pbc, dimensions=dimensions)
 
         # input layer
         cnn_layers = [input_layer]
-        cnn_layers += [CNN_complex_layer(K=K, F_in=F[i-1], F_out=F[i], dimensions=dimensions,
+        cnn_layers += [CNN_complex_layer(K=K, F_in=F[i-1], F_out=F[i], stride=stride, dimensions=dimensions,
                             relu_type=relu_type, pbc=pbc, bias=bias) for i in range(1,layers)]
         cnn_layers += [output_layer]
 
@@ -379,10 +370,10 @@ def reflection(x):
         return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 class sym_model(nn.Module):
-    def __init__(self, state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
+    def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
         super(sym_model,self).__init__()
-        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
+        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
         self.symmetry = sym_func
         
@@ -395,9 +386,9 @@ class sym_model(nn.Module):
         x[:,0] = trans_x[:,0]
         return x
 
-def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False, act=nn.ReLU,
+def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
-    model = sym_model(state_size=state_size, K=K, F=F, output_size=output_size, output_activation=output_activation, 
+    model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, sym_func=sym_func)
     name_index = 1
     return model, name_index
@@ -406,24 +397,28 @@ def mlp_cnn_sym(state_size, K, F=[4,3,2], output_size=1, output_activation=False
 # ------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     # logphi_model = CNNnet_1d(10,2)
-    seed = 10086
+    seed = 286
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn([4,4,2], 2, [3, 2],complex_nn=True,
+    logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1,2], complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
-    from ops.tfim_spin2d import get_init_state
-    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
+    from ops.HS_spin2d import get_init_state
+    state0,_ = get_init_state([3,2,2], kind='rand', n_size=500)
     print(state0[0]) 
+    state_zero = torch.from_numpy(state0[0][None,...])
+    state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
+    print(state_zero.shape)
+    #print(complex_periodic_padding(state_zero, [3,3], [3,3], dimensions='2d'))
     print(state0.shape)
     print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
-    state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=2)
+    state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=3)
     print(state_t)
-    print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
+    print(logphi_model(state_t))
     print(list(logphi_model(torch.from_numpy(state0).float()).size()))
     x, M = reflection(torch.from_numpy(state0))
     #print(x.shape)

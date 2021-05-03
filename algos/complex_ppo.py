@@ -231,11 +231,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             if name.split(".")[3 + name_index] == 'conv_re':
                 p.grad = dydws[cnt][0] + dydws[cnt + 2][1]
             elif  name.split(".")[2 + name_index] == 'linear_re':
-                p.grad = dydws[cnt][0] + dydws[cnt + 1][1]
+                p.grad = dydws[cnt][0] # + dydws[cnt + 1][1]
             elif name.split(".")[3 + name_index] == 'conv_im':
                 p.grad = dydws[cnt - 2][2] + dydws[cnt][3]
             elif name.split(".")[2 + name_index] == 'linear_im':
-                p.grad = dydws[cnt - 1][2] + dydws[cnt][3]
+                p.grad = dydws[cnt][3] # + dydws[cnt - 1][2]
             else:
                 raise ValueError('Miss update layer: {}'.format(name))
             cnt += 1
