@@ -214,28 +214,26 @@ class ComplexReLU(nn.Module):
 
 # COMPLEX CNN
 #--------------------------------------------------------------------
-def translation_phase(x):
+def translation_phase(x, k, dimensions):
     xdevice = x.device
     n_sample = x.shape[0]
-    Dp = x.shape[2]
     z = x[:,0] + 1j*x[:,1]
     z = torch.exp(z)
     real = z.real
     imag = z.imag
-    if len(x.shape) == 4:
+    if dimensions == '1d':
         N = x.shape[-1]
-        vec = torch.exp(1j*2*np.pi*torch.arange(N, device=xdevice)/N)
-        vec_real = vec.real.repeat(n_sample, Dp, 1)
-        vec_imag = vec.imag.repeat(n_sample, Dp, 1)
+        vec = torch.exp(1j*2*np.pi*k[0]*torch.arange(N, device=xdevice)/N)
+        vec_real = vec.real.repeat(n_sample, 1)
+        vec_imag = vec.imag.repeat(n_sample, 1)
         real_part = real*vec_real - imag*vec_imag
         imag_part = real*vec_imag + imag*vec_real
     else:
         L = x.shape[-2]
         W = x.shape[-1]
-        mat = torch.exp(1j*2*np.pi*torch.arange(W, device=xdevice)/W)*torch.exp(1j*2*np.pi*torch.arange(L, device=xdevice)/L)[...,None]
-        print(mat)
-        mat_real = mat.real.repeat(n_sample, Dp, 1, 1)
-        mat_imag = mat.imag.repeat(n_sample, Dp, 1, 1)
+        mat = torch.exp(1j*2*np.pi*k[1]*torch.arange(W, device=xdevice)/W)*torch.exp(1j*2*np.pi*k[0]*torch.arange(L, device=xdevice)/L)[...,None]
+        mat_real = mat.real.repeat(n_sample, 1, 1)
+        mat_imag = mat.imag.repeat(n_sample, 1, 1)
         real_part = real*mat_real - imag*mat_imag
         imag_part = real*mat_imag + imag*mat_real
     return torch.stack((real_part, imag_part), dim=1)
@@ -270,7 +268,7 @@ class CNN_complex_layer(nn.Module):
         return x
 
 class OutPut_complex_layer(nn.Module):
-    def __init__(self,K,F,pbc=True,dimensions='1d'):
+    def __init__(self,K,F,pbc=True,dimensions='1d',momentum=[0,0]):
         """
         output size = 1: logphi
         output size = 2: logphi, theta
@@ -285,16 +283,8 @@ class OutPut_complex_layer(nn.Module):
     def forward(self,x):
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
         x = x.sum(dim=2)
-        x = translation_phase(x)
+        x = translation_phase(x, k=momentum, dimensions=self.dimensions)
         x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
-        #real = x[:,0]
-        #imag = x[:,1]
-        #real = real.sum(2) if self.dimensions == '1d' else real.sum(dim=[2,3])
-        #imag = imag[:,:,:-1].sum(2) if self.dimensions == '1d' else imag[:,:,:-1,:-1].sum(dim=[2,3])
-        # x = self.linear(x).squeeze(-1)
-        # x[:,1] = torch.fmod(x[:,1], np.pi)
-        #x = torch.stack((real, imag), dim=1)
-        #x = x.sum(-1)
         z = x[:,0] + 1j*x[:,1]
         z = torch.log(z)
         x[:,0] = z.real
@@ -303,7 +293,7 @@ class OutPut_complex_layer(nn.Module):
     
 #--------------------------------------------------------------------
 def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, inverse_sym=False, relu_type='sReLU', pbc=True, bias=True):
+        complex_nn=False, inverse_sym=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0]):
     K = K[0] if type(K) is list and len(K) == 1 else K
     stride = stride[0] if type(stride) is list and len(stride) == 1 else stride
     dim = len(state_size) - 1
@@ -315,7 +305,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activati
 
         input_layer = CNN_complex_layer(K=K, F_in=Dp, F_out=F[0], stride=stride, layer_name='1st', dimensions=dimensions,
                                         relu_type=relu_type, pbc=pbc, bias=bias)
-        output_layer = OutPut_complex_layer(K,F[-1], pbc=pbc, dimensions=dimensions)
+        output_layer = OutPut_complex_layer(K,F[-1], pbc=pbc, dimensions=dimensions, momentum=momentum)
 
         # input layer
         cnn_layers = [input_layer]
@@ -417,10 +407,10 @@ def reflection(x):
     
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
         super(sym_model,self).__init__()
         self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
-                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias)
+                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, momentum=momentum)
         self.symmetry = sym_func
         
     # apply symmetry
@@ -433,9 +423,9 @@ class sym_model(nn.Module):
         return x
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, sym_func=identity):
+        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
     model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
-                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, sym_func=sym_func)
+                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, momentum=momentum, sym_func=sym_func)
     name_index = 1
     return model, name_index
 
