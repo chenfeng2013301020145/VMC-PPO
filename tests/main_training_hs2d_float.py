@@ -8,7 +8,7 @@ import torch.nn as nn
 from updators.state_swap_updator import updator
 from ops.HS_spin2d import Heisenberg2DSquare, get_init_state, value2onehot
 from algos.complex_ppo import train
-from algos.core import translation, reflection, inverse
+from algos.core import translation, reflection, identity
 from ops.operators import cal_op, Sz, Sx, SzSz
 import os
 import argparse
@@ -35,10 +35,10 @@ state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=Heisenberg2DSquare, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2', sym_func=translation)
+net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2', sym_func=identity, momentum=[1,0])
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
-output_fn ='HS_2d_sq_L3W2_vmcppo'
+output_fn ='HS_2d_sq_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
         Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed =0,
@@ -99,6 +99,7 @@ def b_check():
     # plt.bar(np.sort(spin_number), np.exp(logphis*2)/np.sum(np.exp(logphis*2)))
     # plt.show()
 
-    sio.savemat('./data/test_data_HS2dsq_L3W2.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
+    sio.savemat('./data/test_data_HS2dsq_L'+str(args.lattice_length)
+                +'W'+str(args.lattice_width)+'.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
 b_check()

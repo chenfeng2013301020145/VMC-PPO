@@ -278,12 +278,13 @@ class OutPut_complex_layer(nn.Module):
         self.F = F
         self._pbc=pbc
         self.dimensions = dimensions
+        self.momentum = momentum
         # self.linear = ComplexLinear(F,1, bias=False)
     
     def forward(self,x):
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
         x = x.sum(dim=2)
-        x = translation_phase(x, k=momentum, dimensions=self.dimensions)
+        x = translation_phase(x, k=self.momentum, dimensions=self.dimensions)
         x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
         z = x[:,0] + 1j*x[:,1]
         z = torch.log(z)

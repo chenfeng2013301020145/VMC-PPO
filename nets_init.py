@@ -82,7 +82,7 @@ def random_train(epochs=100, net_args=dict(), Ops_args=dict(), seed=0, batch_siz
     
     # ------------------------------------------------------------------------
     # MHsampler._model.load_state_dict(small_model.state_dict())
-    states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
+    states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
 
     states, logphis, count, update_states, update_coeffs = _get_unique_states(states, logphis, update_states, update_coeffs)
     IntCount = len(states)

@@ -285,7 +285,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         if epoch == 0:
             MHsampler.first_warmup()
         # update the mh_model
-        if DFS > 2*target:
+        if DFS > 10*target:
             MHsampler._warmup = True
         else:
             MHsampler._warmup = False

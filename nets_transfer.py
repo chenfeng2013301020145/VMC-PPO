@@ -95,7 +95,7 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
     for epoch in range(epochs):
         # MHsampler._model.load_state_dict(small_model.state_dict())
         sample_tic = time.time()
-        states, logphis, update_states, update_coeffs = MHsampler.parallel_mh_sampler()
+        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
 
         states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
                                                                             update_states, update_coeffs)
