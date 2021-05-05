@@ -7,34 +7,43 @@ import numpy as np
 
 def periodic_padding(x, kernel_size, dimensions):
     if dimensions == '1d':
-        # shape of x: (batch_size, Dp, N)
-        return torch.cat((x, x[:,:,0:kernel_size-1]), -1)
+        # shape of real x: (batch_size, Dp, N) and complex x: (batch_size, 2, Dp, N)
+        if len(x.shape) == 3:
+            pad = (0, kernel_size-1)
+        else:
+            pad = (0, kernel_size-1, 0, 0)
     else:
         # shape of real x: (batch_size, Dp, Length, Width) 
-        x = torch.cat((x, x[:,:,0:kernel_size[0]-1,:]), -2)
-        x = torch.cat((x, x[:,:,:,0:kernel_size[1]-1]), -1)
-        return x
-
+        #      and complex x: (batch_size, 2, Dp, Length, Width)
+        if len(x.shape) == 4:
+            pad = (0, kernel_size[1]-1, 0, kernel_size[0] - 1)
+        else:
+            pad = (0, kernel_size[1]-1, 0, kernel_size[0] - 1, 0, 0)
+    return nn.functional.pad(x, pad, mode='circular')
+    
 def complex_periodic_padding(x, kernel_size, stride, dimensions):
     if dimensions == '1d':
         N = x.shape[-1]
         pN = (stride - 1)*N + (kernel_size - 1) - stride + 1
         # shape of complex x: (batch_size, 2, Dp, N)
+        x_old = x.clone()
         for _ in range(pN // N):
-            x = torch.cat((x, x), -1)
+            x = torch.cat((x, x_old), -1)
         return torch.cat((x, x[:,:,:,0:(pN%N)]), -1)
     else:
         # shape of complex x: (batch_size, 2, Dp, Length, Width) 
         L = x.shape[-2]
         W = x.shape[-1]
         pL = (stride[0] - 1)*L + (kernel_size[0] - 1) - stride[0] + 1
+        x_old = x.clone()
         for _ in range(pL // L):
-            x = torch.cat((x, x), -2)
+            x = torch.cat((x, x_old), -2)
         x = torch.cat((x, x[:,:,:,0:(pL%L),:]), -2)
         
         pW = (stride[1] - 1)*W + (kernel_size[1] - 1) - stride[1] + 1
+        x_old = x.clone()
         for _ in range(pW // W):
-            x = torch.cat((x, x), -1)
+            x = torch.cat((x, x_old), -1)
         x = torch.cat((x, x[:,:,:,:,0:(pW%W)]), -1)
         return x
     
@@ -141,8 +150,8 @@ class ComplexLinear(nn.Module):
         self.linear_im = nn.Linear(in_features, out_features, bias=bias)
         
     def forward(self, x): # shpae of x : [batch,2,in_features]
-        real = self.linear_re(x[:,0])
-        imaginary = self.linear_im(x[:,1])
+        real = self.linear_re(x[:,0]) - self.linear_im(x[:,1])
+        imaginary = self.linear_re(x[:,1]) + self.linear_im(x[:,0])
         output = torch.stack((real, imaginary),dim=1)
         return output
 
@@ -205,6 +214,32 @@ class ComplexReLU(nn.Module):
 
 # COMPLEX CNN
 #--------------------------------------------------------------------
+def translation_phase(x):
+    xdevice = x.device
+    n_sample = x.shape[0]
+    Dp = x.shape[2]
+    z = x[:,0] + 1j*x[:,1]
+    z = torch.exp(z)
+    real = z.real
+    imag = z.imag
+    if len(x.shape) == 4:
+        N = x.shape[-1]
+        vec = torch.exp(1j*2*np.pi*torch.arange(N, device=xdevice)/N)
+        vec_real = vec.real.repeat(n_sample, Dp, 1)
+        vec_imag = vec.imag.repeat(n_sample, Dp, 1)
+        real_part = real*vec_real - imag*vec_imag
+        imag_part = real*vec_imag + imag*vec_real
+    else:
+        L = x.shape[-2]
+        W = x.shape[-1]
+        mat = torch.exp(1j*2*np.pi*torch.arange(W, device=xdevice)/W)*torch.exp(1j*2*np.pi*torch.arange(L, device=xdevice)/L)[...,None]
+        print(mat)
+        mat_real = mat.real.repeat(n_sample, Dp, 1, 1)
+        mat_imag = mat.imag.repeat(n_sample, Dp, 1, 1)
+        real_part = real*mat_real - imag*mat_imag
+        imag_part = real*mat_imag + imag*mat_real
+    return torch.stack((real_part, imag_part), dim=1)
+
 class CNN_complex_layer(nn.Module):
     def __init__(self,K,F_in,F_out,stride,layer_name='mid',relu_type='sReLU',
                  pbc=True, bias=True, dimensions='1d'):
@@ -213,11 +248,11 @@ class CNN_complex_layer(nn.Module):
         Dp > 1: onehot encoding
         """
         super(CNN_complex_layer,self).__init__()
-        self.K = [K,K] if type(K) is int else K
+        self.K = [K,K] if type(K) is int and dimensions=='2d' else K
         self._pbc = pbc
         self.layer_name = layer_name
         self.dimensions = dimensions
-        self.stride = [stride, stride] if type(stride) is int else stride
+        self.stride = [stride, stride] if type(stride) is int and dimensions=='2d' else stride
         
         complex_relu = ComplexReLU(relu_type)
         if pbc:
@@ -230,7 +265,7 @@ class CNN_complex_layer(nn.Module):
         if self.layer_name == '1st':
             x = torch.stack((x, torch.zeros_like(x)), dim=1)
         if self._pbc:
-            x = complex_periodic_padding(x, self.K, self.stride, dimensions=self.dimensions)
+            x = periodic_padding(x, self.K, dimensions=self.dimensions)
         x = self.conv(x)
         return x
 
@@ -241,18 +276,29 @@ class OutPut_complex_layer(nn.Module):
         output size = 2: logphi, theta
         """
         super(OutPut_complex_layer,self).__init__()
-        self.K = [K,K] if type(K) is int else K
+        self.K = [K,K] if type(K) is int and dimensions=='2d' else K
         self.F = F
         self._pbc=pbc
         self.dimensions = dimensions
-        #self.linear = ComplexLinear(F,1, bias=False)
+        # self.linear = ComplexLinear(F,1, bias=False)
     
     def forward(self,x):
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
-        x = x.sum(3) if self.dimensions=='1d' else x.sum(dim=[3,4])
+        x = x.sum(dim=2)
+        x = translation_phase(x)
+        x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
+        #real = x[:,0]
+        #imag = x[:,1]
+        #real = real.sum(2) if self.dimensions == '1d' else real.sum(dim=[2,3])
+        #imag = imag[:,:,:-1].sum(2) if self.dimensions == '1d' else imag[:,:,:-1,:-1].sum(dim=[2,3])
         # x = self.linear(x).squeeze(-1)
         # x[:,1] = torch.fmod(x[:,1], np.pi)
-        x = x.sum(-1)
+        #x = torch.stack((real, imag), dim=1)
+        #x = x.sum(-1)
+        z = x[:,0] + 1j*x[:,1]
+        z = torch.log(z)
+        x[:,0] = z.real
+        x[:,1] = z.imag
         return x
     
 #--------------------------------------------------------------------
@@ -400,7 +446,7 @@ if __name__ == '__main__':
     seed = 286
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1,2], complex_nn=True,
+    logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
                            output_size=2, relu_type='softplus2', bias=True)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
@@ -408,19 +454,25 @@ if __name__ == '__main__':
     import sys
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([3,2,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
     print(state0[0]) 
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
     print(state_zero.shape)
-    #print(complex_periodic_padding(state_zero, [3,3], [3,3], dimensions='2d'))
-    print(state0.shape)
+    
+    print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
+    #print(state0.shape)
     print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
     state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=3)
     print(state_t)
     print(logphi_model(state_t))
-    print(list(logphi_model(torch.from_numpy(state0).float()).size()))
-    x, M = reflection(torch.from_numpy(state0))
+    # print(list(logphi_model(torch.from_numpy(state0).float()).size()))
+    # x, M = reflection(torch.from_numpy(state0))
+    
+    #pad = (0,0,0,2)
+    #x = torch.nn.functional.pad(torch.from_numpy(state0[0][None,...]).float(), pad, mode='circular', value=0)
+    #print(x)
+    #print(x.shape)
     #print(x.shape)
     #print(complex_periodic_padding(torch.from_numpy(state0[0]).reshape(1,2,1,4,4),[2,2],'2d'))
 
