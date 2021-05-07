@@ -31,7 +31,7 @@ class train_Ops:
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=3000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, seed=0,
+          sample_division=5, target_dfs=0.01, save_freq=10, sample_freq=5, net_args=dict(), threads=4, seed=0,
           input_fn=0, load_state0=True, output_fn='test'):
     """
     main training process
@@ -273,6 +273,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     MHsampler.basis_warmup_sample = 10*threads
     DFS = 0
     TDFS = target_dfs
+    # get initial samples
+    MHsampler._model.load_state_dict(psi_model.state_dict())
+    MHsampler.first_warmup()
+    states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+    # using unique states to reduce memory usage.
+    states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+                                                            update_states, update_coeffs)
 
     for epoch in range(epochs):
         sample_tic = time.time()
@@ -281,22 +288,20 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             n_optimize = 20
         else:
             target = min(target_dfs, TDFS)
-        # sync parameters
-        MHsampler._model.load_state_dict(psi_model.state_dict())
-        if epoch == 0:
-            MHsampler.first_warmup()
-        # update the mh_model
-        if DFS > 10*target:
-            MHsampler._warmup = True
-        else:
-            MHsampler._warmup = False
-
-        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
-        n_real_sample = MHsampler._n_sample
-
-        # using unique states to reduce memory usage.
-        states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
-                                                                            update_states, update_coeffs)
+        
+        # get new samples from MCMC smapler
+        if DFS > target or epoch%sample_freq == 0 and epoch > 0:
+            if DFS > 10*target:
+                MHsampler._warmup = True
+            else:
+                MHsampler._warmup = False
+            # sync parameters and update the mh_model
+            MHsampler._model.load_state_dict(psi_model.state_dict())
+            states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+            n_real_sample = MHsampler._n_sample
+            # using unique states to reduce memory usage.
+            states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+                                                                    update_states, update_coeffs)
 
         psi = psi_model(torch.from_numpy(states).float().to(gpu))
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
@@ -305,7 +310,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         # buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
-
         sample_toc = time.time()
 
         # ------------------------------------------GPU------------------------------------------
