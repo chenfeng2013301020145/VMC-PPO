@@ -38,7 +38,7 @@ class cal_op():
                 get_init_state=self._get_init_state, init_type=self._init_type, n_sample=self._n_sample, 
                 threads=self._threads, updator=self._updator, operator=op)
         self._sampler.single_state0 = self._state0
-        states, logphis, ustates, ucoeffs = self._sampler.parallel_mh_sampler()
+        states, logphis, ustates, ucoeffs = self._sampler.get_new_samples()
         states, logphis, counts, uss, ucs = _get_unique_states(states, logphis, ustates, ucoeffs)
         self._states = states
         psi = self.psi_model(torch.from_numpy(states).float())

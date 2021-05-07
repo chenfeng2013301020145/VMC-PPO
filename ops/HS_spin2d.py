@@ -61,8 +61,8 @@ class Heisenberg2DSquare():
         L = state.shape[-2]
         W = state.shape[-1]
         Dp = state.shape[0]
-        states = np.zeros([2*L*W+1, Dp, L, W])
-        coeffs = np.zeros(2*L*W+1)
+        states = np.zeros([self._update_size, Dp, L, W])
+        coeffs = np.zeros(self._update_size)
         diag = 0.0
         cnt = 0
         for r in range(L):

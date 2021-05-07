@@ -187,6 +187,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+        delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.5*n_sample))
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
         # delta_theta_os = torch.fmod(delta_logphi_os, np.pi)
         ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
