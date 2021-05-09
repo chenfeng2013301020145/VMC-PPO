@@ -63,9 +63,9 @@ def complex_init(model):
     cnt = -1
     for name, p in model.named_parameters():
         if int(name.split(".")[0]) - cnt == 1:
-            #rho = np.random.rayleigh(1, size=p.data.shape)
-            #rho = torch.from_numpy(np.random.uniform(0., 1., size=p.data.shape)).float()
-            rho = torch.ones_like(p.data)
+            rho = torch.from_numpy(np.random.rayleigh(1, size=p.data.shape)).float()
+            # rho = torch.from_numpy(np.random.uniform(0., 1., size=p.data.shape)).float()
+            # rho = torch.ones_like(p.data)
             theta = np.random.uniform(-np.pi, +np.pi, size=p.data.shape)
             w = np.sqrt(np.prod(p.data.shape[:-2])*(p.data.shape[-1] + p.data.shape[-2]))
             cnt += 1
@@ -231,7 +231,8 @@ def translation_phase(x, k, dimensions):
     else:
         L = x.shape[-2]
         W = x.shape[-1]
-        mat = torch.exp(1j*2*np.pi*k[1]*torch.arange(W, device=xdevice)/W)*torch.exp(1j*2*np.pi*k[0]*torch.arange(L, device=xdevice)/L)[...,None]
+        mat = (torch.exp(1j*2*np.pi*k[1]*torch.arange(W, device=xdevice)/W)
+            *torch.exp(1j*2*np.pi*k[0]*torch.arange(L, device=xdevice)/L)[...,None])
         mat_real = mat.real.repeat(n_sample, 1, 1)
         mat_imag = mat.imag.repeat(n_sample, 1, 1)
         real_part = real*mat_real - imag*mat_imag
@@ -253,11 +254,15 @@ class CNN_complex_layer(nn.Module):
         self.stride = [stride, stride] if type(stride) is int and dimensions=='2d' else stride
         
         complex_relu = ComplexReLU(relu_type)
+        complex_lncosh = ComplexLnCosh()
         if pbc:
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,0, dimensions=dimensions, bias=bias)
         else:
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,1, dimensions=dimensions, bias=bias)
-        self.conv = nn.Sequential(*[complex_conv, complex_relu])
+        if layer_name == '1st':
+            self.conv = nn.Sequential(*[complex_conv, complex_lncosh])
+        else:
+            self.conv = nn.Sequential(*[complex_conv, complex_relu])
 
     def forward(self, x):
         if self.layer_name == '1st':
@@ -283,10 +288,12 @@ class OutPut_complex_layer(nn.Module):
     
     def forward(self,x):
         # shape of complex x: (batch_size, 2, F, N) or (batch_size, 2, F, L, W)
-        x = x.sum(dim=2)
+        # variance scaling 
+        norm = np.sqrt(np.prod(x.shape[2:]))
+        x = x.sum(dim=2)/norm
         x = translation_phase(x, k=self.momentum, dimensions=self.dimensions)
         x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
-        z = x[:,0] + 1j*x[:,1]
+        z = (x[:,0] + 1j*x[:,1])/norm
         z = torch.log(z)
         x[:,0] = z.real
         x[:,1] = z.imag
@@ -327,6 +334,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activati
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
+        # complex_init(model)
     else:
         Dp = state_size[-1]
 
@@ -407,11 +415,13 @@ def reflection(x):
         return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 class sym_model(nn.Module):
-    def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
+    def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, 
+                output_activation=False, act=nn.ReLU, complex_nn=False, relu_type='sReLU', 
+                pbc=True, bias=True, momentum=[0,0], sym_func=identity):
         super(sym_model,self).__init__()
-        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
-                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, momentum=momentum)
+        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
+                    output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
+                    pbc=pbc, bias=bias, momentum=momentum)
         self.symmetry = sym_func
         
     # apply symmetry
@@ -425,8 +435,9 @@ class sym_model(nn.Module):
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
-    model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, output_activation=output_activation, 
-                    act=act, complex_nn=complex_nn, relu_type=relu_type, pbc=pbc, bias=bias, momentum=momentum, sym_func=sym_func)
+    model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
+                    output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
+                    pbc=pbc, bias=bias, momentum=momentum, sym_func=sym_func)
     name_index = 1
     return model, name_index
 
@@ -438,14 +449,14 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='softplus2', bias=True)
+                           output_size=2, relu_type='softplus', bias=True, momentum=[1,1])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     print(state0[0]) 
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)

@@ -31,8 +31,8 @@ class train_Ops:
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=3000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.01, save_freq=10, sample_freq=5, net_args=dict(), threads=4, seed=0,
-          input_fn=0, load_state0=True, output_fn='test'):
+          sample_division=5, target_dfs=0.01, save_freq=10, sample_freq=5, net_args=dict(), threads=4, 
+          seed=0, input_fn=0, load_state0=True, output_fn='test'):
     """
     main training process
     wavefunction: psi = phi*exp(1j*theta)
@@ -124,9 +124,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
 
             delta_logphi_os = logphi_ops - logphi*torch.ones(logphi_ops.shape, device=gpu)
             delta_theta_os = theta_ops - theta*torch.ones(theta_ops.shape, device=gpu)
-            Es = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
+            Es_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
+            Es_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1)
 
-            return (Es*counts).sum().to(cpu), ((Es**2)*counts).sum().to(cpu)
+            return (Es_real*counts).sum().to(cpu), ((Es_real**2 + Es_imag**2)*counts).sum().to(cpu)
   
     def get_fubini_study_distance(data):
         state, count, logphi0, theta0  = data['state'], data['count'], data['logphi0'], data['theta0']
@@ -187,7 +188,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.5*n_sample))
+        # delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.25*n_sample))
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
         # delta_theta_os = torch.fmod(delta_logphi_os, np.pi)
         ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
@@ -274,34 +275,34 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     DFS = 0
     TDFS = target_dfs
     # get initial samples
-    MHsampler._model.load_state_dict(psi_model.state_dict())
-    MHsampler.first_warmup()
-    states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
-    # using unique states to reduce memory usage.
-    states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
-                                                            update_states, update_coeffs)
+    # MHsampler._model.load_state_dict(psi_model.state_dict())
+    # MHsampler.first_warmup()
+    # states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+    # # using unique states to reduce memory usage.
+    # states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+    #                                                         update_states, update_coeffs)
+    # n_real_sample = MHsampler._n_sample
 
     for epoch in range(epochs):
         sample_tic = time.time()
         if epoch > epochs - 100:
-            target = min(target_dfs, TDFS)
+            target = min(0.1*target_dfs, TDFS)
             n_optimize = 20
         else:
             target = min(target_dfs, TDFS)
         
         # get new samples from MCMC smapler
-        if DFS > target or epoch%sample_freq == 0 and epoch > 0:
-            if DFS > 10*target:
-                MHsampler._warmup = True
-            else:
-                MHsampler._warmup = False
-            # sync parameters and update the mh_model
-            MHsampler._model.load_state_dict(psi_model.state_dict())
-            states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
-            n_real_sample = MHsampler._n_sample
-            # using unique states to reduce memory usage.
-            states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
-                                                                    update_states, update_coeffs)
+        if DFS > 10*target:
+            MHsampler._warmup = True
+        else:
+            MHsampler._warmup = False
+        # sync parameters and update the mh_model
+        MHsampler._model.load_state_dict(psi_model.state_dict())
+        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+        n_real_sample = MHsampler._n_sample
+        # using unique states to reduce memory usage.
+        states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+                                                                update_states, update_coeffs)
 
         psi = psi_model(torch.from_numpy(states).float().to(gpu))
         logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
@@ -332,7 +333,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         # adjust the learning rate
         scheduler.step()
         lr = scheduler.get_last_lr()[-1]
-        EGE = AvgE/TolSite - StdE
+        EGE = AvgE/TolSite - 0 if np.isnan(StdE) else AvgE/TolSite - StdE
         TDFS = target_fubini_study_distance(EGE, AvgE, AvgE2, lr*n_optimize)
         # print training informaition
         logger.info('Epoch: {}, AvgE: {:.5f}, ME: {:.5f}, StdE: {:.5f}, Lr: {:.2f}, DFS: {:.5f}, TDFS: {:.5f}, IntCount: {}, SampleTime: {:.3f}, OptimTime: {:.3f}, TolTime: {:.3f}'.
