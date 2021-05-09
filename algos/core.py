@@ -209,6 +209,8 @@ class ComplexReLU(nn.Module):
         elif self.type == 'softplus2':
             z = torch.log(1./2. + torch.exp(z)/2.)
             return torch.stack((z.real, z.imag), dim=1)
+        elif self.type == 'selu':
+            return torch.stack((nn.functional.selu(real), nn.functional.selu(imag)), dim=1)
         else:
             return torch.stack((torch.relu(real), torch.relu(imag)), dim=1)
 
@@ -259,10 +261,10 @@ class CNN_complex_layer(nn.Module):
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,0, dimensions=dimensions, bias=bias)
         else:
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,1, dimensions=dimensions, bias=bias)
-        if layer_name == '1st':
-            self.conv = nn.Sequential(*[complex_conv, complex_lncosh])
-        else:
-            self.conv = nn.Sequential(*[complex_conv, complex_relu])
+        # if layer_name == '1st':
+        #     self.conv = nn.Sequential(*[complex_conv, complex_lncosh])
+        # else:
+        self.conv = nn.Sequential(*[complex_conv, complex_relu])
 
     def forward(self, x):
         if self.layer_name == '1st':
@@ -293,7 +295,7 @@ class OutPut_complex_layer(nn.Module):
         x = x.sum(dim=2)/norm
         x = translation_phase(x, k=self.momentum, dimensions=self.dimensions)
         x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
-        z = (x[:,0] + 1j*x[:,1])/norm
+        z = x[:,0] + 1j*x[:,1]
         z = torch.log(z)
         x[:,0] = z.real
         x[:,1] = z.imag
@@ -334,7 +336,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activati
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
-        # complex_init(model)
+        complex_init(model)
     else:
         Dp = state_size[-1]
 
@@ -449,14 +451,14 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='softplus', bias=True, momentum=[1,1])
+                           output_size=2, relu_type='selu', bias=True, momentum=[1,1])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([6,6,2], kind='rand', n_size=500)
     print(state0[0]) 
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
