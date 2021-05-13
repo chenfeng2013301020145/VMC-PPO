@@ -271,16 +271,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         else:
             MHsampler._warmup = False
             
-        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+        states, logphis, thetas, update_states, update_coeffs = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
 
         # using unique states to reduce memory usage.
-        states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
-                                                                            update_states, update_coeffs)
+        states, logphis, thetas, counts, update_states, update_coeffs \
+            = _get_unique_states(states, logphis, thetas, update_states, update_coeffs)
 
-        psi = psi_model(torch.from_numpy(states).float().to(gpu))
-        logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
-        thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
 
         IntCount = len(states)

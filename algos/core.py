@@ -207,8 +207,10 @@ class ComplexReLU(nn.Module):
             z = torch.log(1. + torch.exp(z))
             return torch.stack((z.real, z.imag), dim=1)
         elif self.type == 'softplus2':
-            z = torch.log(1./2. + torch.exp(z)/2.)
-            return torch.stack((z.real, z.imag), dim=1)
+            # z = torch.log(1./2. + torch.exp(z)/2.)
+            real = torch.log(1./2. + torch.exp(real)/2.)
+            imag = torch.log(1./2. + torch.exp(imag)/2.)
+            return torch.stack((real, imag), dim=1)
         elif self.type == 'selu':
             return torch.stack((nn.functional.selu(real), nn.functional.selu(imag)), dim=1)
         else:
@@ -256,14 +258,11 @@ class CNN_complex_layer(nn.Module):
         self.stride = [stride, stride] if type(stride) is int and dimensions=='2d' else stride
         
         complex_relu = ComplexReLU(relu_type)
-        complex_lncosh = ComplexLnCosh()
+        # complex_lncosh = ComplexLnCosh()
         if pbc:
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,0, dimensions=dimensions, bias=bias)
         else:
             complex_conv = ComplexConv(F_in,F_out,self.K,stride,1, dimensions=dimensions, bias=bias)
-        # if layer_name == '1st':
-        #     self.conv = nn.Sequential(*[complex_conv, complex_lncosh])
-        # else:
         self.conv = nn.Sequential(*[complex_conv, complex_relu])
 
     def forward(self, x):
@@ -410,11 +409,23 @@ def reflection(x):
         x_flr = torch.flip(x, dims=[2])
         return torch.stack((x, x_flr), dim=1).reshape([-1] + list(x.shape[1:])), N
     else:
-        N = 4
-        x_flr = torch.flip(x, dims=[2])
-        x_fud = torch.flip(x, dims=[3])
+        N = 2
         x_flrud = torch.flip(x, dims=[2,3])
-        return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
+        return torch.stack((x, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
+
+def c4rotation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
+    dimension = len(x.shape) - 2
+    if dimension == 1 or x.shape[-1] != x.shape[-2]:
+        N = 2
+        x180 = torch.rot90(x, 2, dims=[2,3])
+        return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
+    else:
+        N = 4
+        x90 = torch.rot90(x, 1, dims=[2,3])
+        x180 = torch.rot90(x, 2, dims=[2,3])
+        x270 = torch.rot90(x, 3, dims=[2,3])
+        return torch.stack((x, x90, x180, x270), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, 
@@ -430,10 +441,8 @@ class sym_model(nn.Module):
     def forward(self, x):
         trans_x, N = self.symmetry(x)
         trans_x = self.model(trans_x)
-        x = self.model(x)
-        trans_x = trans_x.reshape(x.shape[0], N, x.shape[1]).mean(dim=1)
-        x[:,0] = trans_x[:,0]
-        return x
+        trans_x = trans_x.reshape(x.shape[0], N, 2).mean(dim=1)
+        return trans_x
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
@@ -450,26 +459,33 @@ if __name__ == '__main__':
     seed = 286
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[1,1])
+    logphi_model, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_func=c4rotation)
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([6,6,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     print(state0[0]) 
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
     print(state_zero.shape)
     
-    print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
+    # print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
     #print(state0.shape)
-    print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
-    state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=3)
+    print(logphi_model(torch.from_numpy(state0[:3]).float()))
+    print(logphi_model(torch.from_numpy(state0).float())[:3])
+    # state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=2)
+    state_t = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),2, dims=[2,3])
     print(state_t)
-    print(logphi_model(state_t))
+    # print(logphi_model(state_t))
+    logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_func=identity)
+    logphi_model_sym.load_state_dict(logphi_model.state_dict())
+    # logphi_model_sym.eval()
+    print(logphi_model_sym(torch.from_numpy(state0[1][None,...]).float()))
     # print(list(logphi_model(torch.from_numpy(state0).float()).size()))
     # x, M = reflection(torch.from_numpy(state0))
     

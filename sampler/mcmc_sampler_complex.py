@@ -62,19 +62,20 @@ class MCsampler():
         self._state0 = self.warmup_sample(n_sample = 20000)
         return 
     
-    def get_single_sample(self, state, logphi_i, mask, rand, update_states, update_coeffs):
+    def get_single_sample(self, state, logphi_i, theta_i, mask, rand, update_states, update_coeffs):
         with torch.no_grad():
             state_f = self._updator._get_update(state, mask)
             psi_f = self._model(torch.from_numpy(state_f[None,...]).float()).numpy()
 
             logphi_f = psi_f[:,0]
+            theta_f = psi_f[:,1]
             delta_logphi = logphi_f - logphi_i
 
             if delta_logphi>0 or rand<=np.exp(delta_logphi*2.0) or self.accept:
                 update_states, update_coeffs = _generate_updates(state_f, self._op)
-                return state_f, logphi_f, update_states, update_coeffs
+                return state_f, logphi_f, theta_f, update_states, update_coeffs
             else:
-                return state, logphi_i, update_states, update_coeffs
+                return state, logphi_i, theta_i, update_states, update_coeffs
     
     def warmup_sample(self, n_sample):
         masks = self._updator.generate_mask(n_sample)
@@ -116,6 +117,7 @@ class MCsampler():
         # empty tensor storing the sample data
         state_sample_per_thread = np.zeros([n_sample_per_thread] + self._single_state_shape)
         logphi_sample_per_thread = np.zeros(n_sample_per_thread)
+        theta_sample_per_thread = np.zeros(n_sample_per_thread)
         us_sample_per_thread = np.zeros([n_sample_per_thread, self._update_size] + self._single_state_shape)
         uc_sample_per_thread = np.zeros([n_sample_per_thread, self._update_size])
         
@@ -128,18 +130,21 @@ class MCsampler():
             psi = self._model(torch.from_numpy(state0[None,...]).float()).numpy()
  
             logphi = psi[:,0]
+            theta = psi[:,1]
             i = 0
             update_states, update_coeffs = _generate_updates(state, self._op)
             
             while i < n_sample_per_thread:
-                state, logphi, update_states, update_coeffs = self.get_single_sample(state, logphi, masks[i], rands[i], update_states, update_coeffs)
+                state, logphi, theta, update_states, update_coeffs \
+                    = self.get_single_sample(state, logphi, theta, masks[i], rands[i], update_states, update_coeffs)
                 state_sample_per_thread[i] = state
                 logphi_sample_per_thread[i] = logphi
+                theta_sample_per_thread[i] = theta
                 us_sample_per_thread[i] = update_states
                 uc_sample_per_thread[i] = update_coeffs
                 i += 1
 
-        return (state_sample_per_thread, logphi_sample_per_thread,
+        return (state_sample_per_thread, logphi_sample_per_thread, theta_sample_per_thread,
                 us_sample_per_thread, uc_sample_per_thread)
 
     def get_new_samples(self):
@@ -170,12 +175,13 @@ class MCsampler():
 
         state_list = np.zeros([self._threads, n_sample_per_thread] + self._single_state_shape)
         logphi_list = np.zeros([self._threads, n_sample_per_thread])
+        theta_list = np.zeros([self._threads, n_sample_per_thread])
         us_list = np.zeros([self._threads, n_sample_per_thread, self._update_size] + self._single_state_shape)
         uc_list = np.zeros([self._threads, n_sample_per_thread, self._update_size])
 
         cnt = 0
         for res in results: 
-            state_list[cnt], logphi_list[cnt], us_list[cnt], uc_list[cnt] = res.get()
+            state_list[cnt], logphi_list[cnt], theta_list[cnt], us_list[cnt], uc_list[cnt] = res.get()
             cnt += 1
 
         # update the initial sampling state
@@ -184,9 +190,10 @@ class MCsampler():
         
         return (state_list.reshape([self._n_sample] + self._single_state_shape), 
                 logphi_list.reshape(self._n_sample),
+                theta_list.reshape(self._n_sample),
                 us_list.reshape([self._n_sample, self._update_size] + self._single_state_shape),
                 uc_list.reshape([self._n_sample, self._update_size]))
-
+    
 if __name__ == "__main__":
     import sys
     sys.path.append('..')

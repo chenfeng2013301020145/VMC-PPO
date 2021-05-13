@@ -97,15 +97,16 @@ class SampleBuffer:
             return dict(state=gpu_states, count=gpu_counts, logphi0=gpu_logphi0, 
                         theta0=gpu_theta0, ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)
                     
-def _get_unique_states(states, logphis, ustates, ucoeffs):
+def _get_unique_states(states, logphis, thetas, ustates, ucoeffs):
     """
     Returns the unique states, their coefficients and the counts.
     """
     states, indices, counts = np.unique(states, return_index=True, return_counts=True, axis=0)
     logphis = logphis[indices]
+    thetas = thetas[indices]
     ustates = ustates[indices]
     ucoeffs = ucoeffs[indices]
-    return states, logphis, counts, ustates, ucoeffs
+    return states, logphis, thetas, counts, ustates, ucoeffs
 
 def _generate_updates(states, operator, single_state_shape, update_size, threads):
     """

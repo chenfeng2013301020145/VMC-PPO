@@ -30,7 +30,7 @@ class train_Ops:
 # ------------------------------------------------------------------------
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
-          learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=2000, clip_ratio=0.1,
+          learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=3000,
           sample_division=5, target_dfs=0.01, save_freq=10, sample_freq=5, net_args=dict(), threads=4, 
           seed=0, input_fn=0, load_state0=True, output_fn='test'):
     """
@@ -63,8 +63,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     """
     seed += 1000*np.sum(np.arange(threads))
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
     np.random.seed(seed)
     
     output_dir = os.path.join('../results', output_fn)
@@ -177,9 +175,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         delta_logphi = delta_logphi - delta_logphi.mean()
         weights = count[...,None]*torch.exp(delta_logphi*2)
         weights = (weights/weights.sum()).detach()
-        clip_ws = count[...,None]*torch.clamp(torch.exp(delta_logphi*2), 
-                                         1-clip_ratio, 1+clip_ratio)
-        clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the coeffs of the energy
         n_sample = op_states.shape[0]
@@ -198,23 +193,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
-        cme_real = (clip_ws*ops_real[..., None]).sum().detach()
         
         E_re_re = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
-        cE_re_re = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
-        loss_re_re = 0.5*torch.max(weights*E_re_re, clip_ws*cE_re_re).sum()
+        loss_re_re = 0.5*(weights*E_re_re).sum()
 
         E_re_im = ops_real[..., None]*theta - me_real*theta - ops_imag[..., None]*logphi
-        cE_re_im = ops_real[..., None]*theta - cme_real*theta - ops_imag[..., None]*logphi
-        loss_re_im = 0.5*torch.max(weights*E_re_im, clip_ws*cE_re_im).sum()
+        loss_re_im = 0.5*(weights*E_re_im).sum()
 
         E_im_re = -ops_real[..., None]*theta + me_real*theta + ops_imag[...,None]*logphi
-        cE_im_re = -ops_real[..., None]*theta + cme_real*theta + ops_imag[...,None]*logphi
-        loss_im_re = 0.5*torch.max(weights*E_im_re, clip_ws*cE_im_re).sum()
+        loss_im_re = 0.5*(weights*E_im_re).sum()
 
         E_im_im = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
-        cE_im_im = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
-        loss_im_im = 0.5*torch.max(weights*E_im_im, clip_ws*cE_im_im).sum()
+        loss_im_im = 0.5*(weights*E_im_im).sum()
 
         return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0), me_real
 
@@ -247,22 +237,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
 
     # setting optimizer in GPU
     optimizer = torch.optim.Adam(psi_model.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [500], gamma=0.1)
 
     def update(batch_size, target):
         # full samples for small systems
-        # data = buffer.get(batch_size=batch_size, get_eops=False)
+        data = buffer.get(batch_size=batch_size, get_eops=False)
         # off-policy update
-        for i in range(n_optimize):
+        for _ in range(n_optimize):
             # random batch for large systems
-            data = buffer.get(batch_size=batch_size, batch_type='rand', get_eops=False)
+            # data = buffer.get(batch_size=batch_size, batch_type='rand', get_eops=True)
             optimizer.zero_grad()
             dfs = get_fubini_study_distance(data)
             _, me = compute_loss_energy(psi_model,data)
-            if dfs > target:
-                logger.warning(
-                    'early stop at step={} as reaching maximal FS distance'.format(i))
-                break
 
             regular_backward(data)
             optimizer.step()
@@ -276,6 +262,14 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     MHsampler.basis_warmup_sample = 10*threads
     DFS = 0
     TDFS = target_dfs
+    # get initial samples
+    # MHsampler._model.load_state_dict(psi_model.state_dict())
+    # MHsampler.first_warmup()
+    # states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
+    # # using unique states to reduce memory usage.
+    # states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+    #                                                         update_states, update_coeffs)
+    # n_real_sample = MHsampler._n_sample
 
     for epoch in range(epochs):
         sample_tic = time.time()
@@ -292,12 +286,15 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             MHsampler._warmup = False
         # sync parameters and update the mh_model
         MHsampler._model.load_state_dict(psi_model.state_dict())
-        states, logphis, thetas, update_states, update_coeffs = MHsampler.get_new_samples()
+        states, logphis, update_states, update_coeffs = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
         # using unique states to reduce memory usage.
-        states, logphis, thetas, counts, update_states, update_coeffs \
-            = _get_unique_states(states, logphis,thetas, update_states, update_coeffs)
+        states, _, counts, update_states, update_coeffs = _get_unique_states(states, logphis,
+                                                                update_states, update_coeffs)
 
+        psi = psi_model(torch.from_numpy(states).float().to(gpu))
+        logphis = psi[:, 0].reshape(len(states)).cpu().detach().numpy()
+        thetas = psi[:, 1].reshape(len(states)).cpu().detach().numpy()
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
         # buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
@@ -306,7 +303,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
 
         # ------------------------------------------GPU------------------------------------------
         op_tic = time.time()
-        DFS, ME = update(batch_size, target)
+        DFS, ME = update(IntCount, target)
         op_toc = time.time()
 
         sd = 1 if IntCount < batch_size else sample_division

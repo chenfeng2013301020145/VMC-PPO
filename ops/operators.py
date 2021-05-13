@@ -38,11 +38,10 @@ class cal_op():
                 get_init_state=self._get_init_state, init_type=self._init_type, n_sample=self._n_sample, 
                 threads=self._threads, updator=self._updator, operator=op)
         self._sampler.single_state0 = self._state0
-        states, logphis, ustates, ucoeffs = self._sampler.get_new_samples()
-        states, logphis, counts, uss, ucs = _get_unique_states(states, logphis, ustates, ucoeffs)
+        states, logphis, thetas, ustates, ucoeffs = self._sampler.get_new_samples()
+        states, logphis, thetas, counts, uss, ucs \
+            = _get_unique_states(states, logphis, thetas, ustates, ucoeffs)
         self._states = states
-        psi = self.psi_model(torch.from_numpy(states).float())
-        thetas = psi[:, 1].reshape(len(states)).detach().numpy()
         self._buff.update(states, logphis, thetas, counts, uss, ucs)
         return 
 
