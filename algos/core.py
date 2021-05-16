@@ -296,13 +296,11 @@ class OutPut_complex_layer(nn.Module):
         x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
         z = x[:,0] + 1j*x[:,1]
         z = torch.log(z)
-        x[:,0] = z.real
-        x[:,1] = z.imag
-        return x
+        return torch.stack((z.real, z.imag), dim=1)
     
 #--------------------------------------------------------------------
 def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, inverse_sym=False, relu_type='sReLU', pbc=True, bias=True, momentum=[1,0]):
+        complex_nn=False, inverse_sym=False, relu_type='selu', pbc=True, bias=True, momentum=[1,0]):
     K = K[0] if type(K) is list and len(K) == 1 else K
     stride = stride[0] if type(stride) is list and len(stride) == 1 else stride
     dim = len(state_size) - 1
@@ -409,9 +407,11 @@ def reflection(x):
         x_flr = torch.flip(x, dims=[2])
         return torch.stack((x, x_flr), dim=1).reshape([-1] + list(x.shape[1:])), N
     else:
-        N = 2
+        N = 4
+        x_flr = torch.flip(x, dims=[2])
+        x_fud = torch.flip(x, dims=[3])
         x_flrud = torch.flip(x, dims=[2,3])
-        return torch.stack((x, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
+        return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
 
 def c4rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -429,7 +429,7 @@ def c4rotation(x):
     
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, 
-                output_activation=False, act=nn.ReLU, complex_nn=False, relu_type='sReLU', 
+                output_activation=False, act=nn.ReLU, complex_nn=False, relu_type='selu', 
                 pbc=True, bias=True, momentum=[0,0], sym_func=identity):
         super(sym_model,self).__init__()
         self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
@@ -439,21 +439,17 @@ class sym_model(nn.Module):
         
     # apply symmetry
     def forward(self, x):
-        trans_x, N = self.symmetry(x)
-        trans_x = self.model(trans_x)
-        trans_x = trans_x.reshape(x.shape[0], N, 2)
-        z = trans_x[:,:,0] + 1j*trans_x[:,:,1]
+        sym_x, N = self.symmetry(x)
+        sym_x = self.model(sym_x)
+        # variance scaling
+        sym_x = sym_x.reshape(x.shape[0], N, 2)
+        z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
         z = torch.exp(z).sum(dim=1)
         z = torch.log(z)
-        logphis = z.real
-        thetas = z.imag
-        #logphis = trans_x[:,:,0].mean(dim=1)
-        #thetas = trans_x[:,0,1]
-        # thetas = (trans_x[:,:,1]*torch.tensor([1, 1, -1, -1])[None, ...]).sum(dim=1)
-        return torch.stack((logphis, thetas),dim=1)
+        return torch.stack((z.real, z.imag),dim=1)
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
+        complex_nn=False, relu_type='selu', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
     model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
                     output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum, sym_func=sym_func)

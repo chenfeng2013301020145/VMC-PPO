@@ -35,7 +35,7 @@ state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=Heisenberg2DSquare, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='softplus2', sym_func=identity, momentum=[1,0])
+net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_func=identity, momentum=[1,0])
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
 output_fn ='HS_2d_sq_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo'
