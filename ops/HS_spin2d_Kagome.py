@@ -9,6 +9,10 @@ def get_init_state(state_size, kind='rand', n_size=1):
     L = state_size[0]
     W = state_size[1]
     Dp = state_size[-1]
+    
+    L3 = L // 2
+    W3 = W // 2
+    num = L3*W3*3
     state = np.zeros([n_size, Dp, L, W])
     state_v_r = 0
 
@@ -22,23 +26,54 @@ def get_init_state(state_size, kind='rand', n_size=1):
 
     if kind == 'rand':
         for i in range(n_size):
-            state_v = np.zeros([L, W])
-            pos = np.random.choice(L*W, L*W//2, replace=False)
-            pos_y = pos // W
-            pos_x = pos % W
-            state_v[pos_y, pos_x] = 1
+            state_v = np.zeros([L3, W3, 3])
+            pos = np.random.choice(num, num//2, replace=False)
+            pos_in = pos % 3
+            pos_out = pos // 3
+            pos_y = pos_out // W3
+            pos_x = pos_out % W3
+            state_v[pos_y, pos_x, pos_in] = 1
             # print(state_v.sum())
-            state[i] = value2onehot(state_v, Dp)
+            state[i] = state3_to_state2(value2onehot(state_v, Dp), state_size)
             state_v_r += (state_v - (Dp-1)/2).sum()
 
     return state, state_v_r
 
+def state3_to_state2(state3, state_size):
+    L = state_size[0]
+    W = state_size[1]
+    Dp = state_size[-1]
+    state2 = np.zeros([Dp, L, W])
+    
+    L3, W3 = state3.shape[0], state3.shape[1]
+    X, Y = np.meshgrid(range(W3), range(L3))
+    for x,y in zip(X.reshape(-1), Y.reshape(-1)):
+        state2[:, 2*y, 2*x] = state3[:, y, x, 0]
+        state2[:, 2*y, 2*x + 1] = state3[:, y, x, 1]
+        state2[:, 2*y + 1, 2*x] = state3[:, y, x, 2]
+    return state2
+
+def state2_to_state3(state2, state_size):
+    L = state_size[0]
+    W = state_size[1]
+    Dp = state_size[-1]
+    
+    L3 = L // 2
+    W3 = W // 2
+    state3 = np.zeros([Dp, L3, W3, 3])
+    X, Y = np.meshgrid(range(W3), range(L3))
+    
+    for x,y in zip(X.reshape(-1), Y.reshape(-1)):
+        state3[:, y, x, :] = state2[:, 2*y:2*y+2, 2*x:2*x+2].reshape(Dp, 4)[:, :3]
+    return state3
+
 def value2onehot(state, Dp):
     L = state.shape[0]
     W = state.shape[1]
-    X, Y = np.meshgrid(range(W), range(L))
-    state_onehot = np.zeros([Dp, L, W])
-    state_onehot[state.astype(dtype=np.int8), Y, X] = 1
+    I = state.shape[2]
+    X, Y, Z = np.meshgrid(range(W), range(L), range(I))
+    state_onehot = np.zeros([Dp, L, W, I])
+    state_onehot[state.astype(dtype=np.int8), Y, X, Z] = 1
     return state_onehot
 
 
@@ -53,10 +88,10 @@ class Heisenberg2DKagome():
             pbc: True for periodic boundary condition.
         """
         self._pbc = pbc
-        self._00_nn = ((1, 0), (1, 1))
-        self._01_nn = ((0, 0), (0, 0))
-        self._10_nn = ((0, 1), (1, 0))
-        self._11_nn = ((0, 1), (1, 1))
+        self._00_nn = ((1, 0), (0, 1))
+        self._01_nn = ((0, 1), (1, 1))
+        self._10_nn = ((1, 0), (1, 1))
+        self._11_nn = ((0, 0), (0, 0))
         self._update_size = 2*state_size[0]*state_size[1] + 1
 
     def find_states(self, state: np.ndarray):
@@ -75,11 +110,11 @@ class Heisenberg2DKagome():
                     nearest_neighbors = self._00_nn
                 elif r%2 == 0 and c%2 == 1:
                     nearest_neighbors = self._01_nn
-                    fac = 0
                 elif r%2 == 1 and c%2 == 0:
                     nearest_neighbors = self._10_nn
                 elif r%2 == 1 and c%2 == 1:
                     nearest_neighbors = self._11_nn
+                    fac = 0
                 
                 for dr, dc in nearest_neighbors:
                     rr, cc = r + dr, c + dc
@@ -104,3 +139,17 @@ class Heisenberg2DKagome():
         states[-1] = state.copy()
         coeffs[-1] = diag
         return states, coeffs
+    
+    
+if __name__ == '__main__':
+    import torch
+    k = torch.tensor([0,1,2])
+    print(k)
+    state3 = k.repeat(2,2,2,1)
+    print(state3.shape)
+    state2 = state3_to_state2(state3, [4,4,2])
+    print(state2)
+    state4 = state2_to_state3(state2, [4,4,2])
+    print(torch.tensor(state4) - state3)
+    state, ms = get_init_state([4,4,2])
+    print(ms)

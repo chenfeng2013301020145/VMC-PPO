@@ -54,21 +54,3 @@ class updator():
         else:
             self._state = np.bitwise_xor(self._state, mask)
             return self._state
-
-if __name__=='__main__':
-    from tfim_spin2d import get_init_state
-
-    state_size = [4,4,2]
-    state0 = get_init_state(state_size, kind='rand')
-    print(state0)
-
-    Op = updator(state_size)
-    state_v = Op.onehot2value(state0)
-    print(state_v)
-
-    state_onehot = Op.value2onehot(state_v)
-    print(state_onehot)
-
-    masks = Op.generate_mask(100)
-    print(masks[10])
-    print(Op._get_update(state_onehot, masks[10]) - state_onehot)

@@ -442,13 +442,15 @@ class sym_model(nn.Module):
         trans_x, N = self.symmetry(x)
         trans_x = self.model(trans_x)
         trans_x = trans_x.reshape(x.shape[0], N, 2)
-        logphis = trans_x[:,:,0].mean(dim=1)
-        thetas = trans_x[:,0,1]
+        z = trans_x[:,:,0] + 1j*trans_x[:,:,1]
+        z = torch.exp(z).sum(dim=1)
+        z = torch.log(z)
+        logphis = z.real
+        thetas = z.imag
+        #logphis = trans_x[:,:,0].mean(dim=1)
+        #thetas = trans_x[:,0,1]
+        # thetas = (trans_x[:,:,1]*torch.tensor([1, 1, -1, -1])[None, ...]).sum(dim=1)
         return torch.stack((logphis, thetas),dim=1)
-        #z = trans_x[:,:,0] + 1j*trans_x[:,:,1]
-        #print(z)
-        #z = (torch.exp(z).sum(dim=1)).log()
-        #return torch.stack((z.real, z.imag),dim=1)
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, relu_type='sReLU', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
@@ -474,16 +476,15 @@ if __name__ == '__main__':
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
     state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
-    print(state0[0]) 
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
-    print(state_zero.shape)
-    
+    state_t0 = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),3, dims=[2,3])
+    print(state_t0)
     # print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
     #print(state0.shape)
-    print(logphi_model(torch.from_numpy(state0[0][None,...]).float()))
+    print(logphi_model(state_t0))
     # print(logphi_model(torch.from_numpy(state0).float())[:3])
-    state_t = torch.roll(torch.from_numpy(state0[0][None,...]).float(),shifts=1, dims=2)
+    state_t = torch.roll(state_t0, shifts=1, dims=2)
     # state_t = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),2, dims=[2,3])
     print(state_t)
     print(logphi_model(state_t))
@@ -491,7 +492,7 @@ if __name__ == '__main__':
                            output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_func=identity)
     logphi_model_sym.load_state_dict(logphi_model.state_dict())
     # logphi_model_sym.eval()
-    print(logphi_model_sym(torch.from_numpy(state0).float())[1])
+    #print(logphi_model_sym(torch.from_numpy(state0).float())[1])
     # print(list(logphi_model(torch.from_numpy(state0).float()).size()))
     # x, M = reflection(torch.from_numpy(state0))
     

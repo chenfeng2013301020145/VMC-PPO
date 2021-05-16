@@ -26,18 +26,3 @@ class updator():
         # self._state = np.concatenate((self._state, self._state[0,:].reshape(1,self._Dp)),0)
         return state_f.T.reshape(state.shape)
 
-if __name__ == "__main__":
-    from HS_spin2d import get_init_state
-    state0, _ = get_init_state([4,3,2], kind='rand', n_size=10)
-    print(state0[2].shape)
-    
-    Update = updator([4,3,2])
-    masks = Update.generate_mask(100)
-    print(masks[10])
-    
-    print(state0[2])
-    statef = Update._get_update(state0[2], masks[10])
-    print(statef)
-    
-    # print(statef)
-    # print(statef - state0)
