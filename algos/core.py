@@ -64,8 +64,6 @@ def complex_init(model):
     for name, p in model.named_parameters():
         if int(name.split(".")[0]) - cnt == 1:
             rho = torch.from_numpy(np.random.rayleigh(1, size=p.data.shape)).float()
-            # rho = torch.from_numpy(np.random.uniform(0., 1., size=p.data.shape)).float()
-            # rho = torch.ones_like(p.data)
             theta = np.random.uniform(-np.pi, +np.pi, size=p.data.shape)
             w = np.sqrt(np.prod(p.data.shape[:-2])*(p.data.shape[-1] + p.data.shape[-2]))
             cnt += 1
@@ -413,13 +411,40 @@ def reflection(x):
         x_flrud = torch.flip(x, dims=[2,3])
         return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
 
+def c2rotation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
+    dimension = len(x.shape) - 2
+    N = 2
+    if dimension == 1:
+        x180 = torch.rot90(x, 2, dims=[2])
+    else:
+        x180 = torch.rot90(x, 2, dims=[2, 3])
+    return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
+
+def transpose(x):
+    dimension = len(x.shape) - 2
+    if dimension == 1 or x.shape[-1] != x.shape[-2]:
+        raise ValueError('Only 2D square-shape lattice can be transposed.')
+    else:
+        N = 2
+        xT = torch.transpose(x, 2, 3)
+        return torch.stack((x, xT), dim=1).reshape([-1] + list(x.shape[1:])), N
+    
+def transpose2(x):
+    dimension = len(x.shape) - 2
+    if dimension == 1 or x.shape[-1] != x.shape[-2]:
+        raise ValueError('Only 2D square-shape lattice can be transposed.')
+    else:
+        N = 3
+        xT = torch.transpose(x, 2, 3)
+        xT2 = torch.rot90(torch.transpose(torch.rot90(x, 1, dims=[2,3]), 2, 3), -1, dims=[2,3])
+        return torch.stack((x, xT, xT2), dim=1).reshape([-1] + list(x.shape[1:])), N
+    
 def c4rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     dimension = len(x.shape) - 2
     if dimension == 1 or x.shape[-1] != x.shape[-2]:
-        N = 2
-        x180 = torch.rot90(x, 2, dims=[2,3])
-        return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
+        return c2rotation(x)
     else:
         N = 4
         x90 = torch.rot90(x, 1, dims=[2,3])
@@ -430,18 +455,24 @@ def c4rotation(x):
 class sym_model(nn.Module):
     def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, 
                 output_activation=False, act=nn.ReLU, complex_nn=False, relu_type='selu', 
-                pbc=True, bias=True, momentum=[0,0], sym_func=identity):
+                pbc=True, bias=True, momentum=[0,0], sym_funcs=[identity]):
         super(sym_model,self).__init__()
         self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
                     output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum)
-        self.symmetry = sym_func
-        
+        self.sym_funcs = sym_funcs
+    
+    def symmetry(self, x):
+        N = 1
+        for func in self.sym_funcs:
+            x, n = func(x)
+            N *= n
+        return x, N       
+    
     # apply symmetry
     def forward(self, x):
         sym_x, N = self.symmetry(x)
         sym_x = self.model(sym_x)
-        # variance scaling
         sym_x = sym_x.reshape(x.shape[0], N, 2)
         z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
         z = torch.exp(z).sum(dim=1)
@@ -449,10 +480,10 @@ class sym_model(nn.Module):
         return torch.stack((z.real, z.imag),dim=1)
 
 def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, relu_type='selu', pbc=True, bias=True, momentum=[0,0], sym_func=identity):
+        complex_nn=False, relu_type='selu', pbc=True, bias=True, momentum=[0,0], sym_funcs=[identity]):
     model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
                     output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
-                    pbc=pbc, bias=bias, momentum=momentum, sym_func=sym_func)
+                    pbc=pbc, bias=bias, momentum=momentum, sym_funcs=sym_funcs)
     name_index = 1
     return model, name_index
 
@@ -464,7 +495,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     logphi_model, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_func=c4rotation)
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, identity])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
@@ -485,7 +516,7 @@ if __name__ == '__main__':
     print(state_t)
     print(logphi_model(state_t))
     logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_func=identity)
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[identity])
     logphi_model_sym.load_state_dict(logphi_model.state_dict())
     # logphi_model_sym.eval()
     #print(logphi_model_sym(torch.from_numpy(state0).float())[1])
