@@ -106,9 +106,9 @@ class cal_op():
 
 def onehot2value(state, Dp, dimensions): 
     if dimensions == 1:
-        state_v = np.arange(0,Dp).reshape(Dp,1)*np.squeeze(state)
+        state_v = np.arange(0,Dp).reshape(Dp,1)*np.squeeze(state, 0)
     else:
-        state_v = np.arange(0,Dp).reshape(Dp,1,1)*np.squeeze(state)
+        state_v = np.arange(0,Dp).reshape(Dp,1,1)*np.squeeze(state, 0)
     return np.sum(state_v,0).astype(dtype=np.int8)
 
 class Sz():

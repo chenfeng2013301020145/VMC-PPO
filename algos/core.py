@@ -299,6 +299,10 @@ class OutPut_complex_layer(nn.Module):
 #--------------------------------------------------------------------
 def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
         complex_nn=False, inverse_sym=False, relu_type='selu', pbc=True, bias=True, momentum=[1,0]):
+    '''Input: State (batch_size, Dp, N) for 1d lattice,
+                    (batch_size, Dp, L, W) for 2d lattice.
+       Output: [logphis, thetas].
+    '''
     K = K[0] if type(K) is list and len(K) == 1 else K
     stride = stride[0] if type(stride) is list and len(stride) == 1 else stride
     dim = len(state_size) - 1
@@ -502,7 +506,7 @@ if __name__ == '__main__':
     import sys
     sys.path.append('..')
     from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([3,3,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([6,6,2], kind='rand', n_size=500)
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
     state_t0 = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),3, dims=[2,3])

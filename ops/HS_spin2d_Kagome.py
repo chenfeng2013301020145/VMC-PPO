@@ -45,7 +45,8 @@ def state3_to_state2(state3, state_size):
     Dp = state_size[-1]
     state2 = np.zeros([Dp, L, W])
     
-    L3, W3 = state3.shape[0], state3.shape[1]
+    # shape of state3: (Dp, L3, W3, I)
+    L3, W3 = state3.shape[1], state3.shape[2]
     X, Y = np.meshgrid(range(W3), range(L3))
     for x,y in zip(X.reshape(-1), Y.reshape(-1)):
         state2[:, 2*y, 2*x] = state3[:, y, x, 0]
@@ -91,8 +92,8 @@ class Heisenberg2DKagome():
         self._00_nn = ((1, 0), (0, 1))
         self._01_nn = ((0, 1), (1, 1))
         self._10_nn = ((1, 0), (1, 1))
-        self._11_nn = ((0, 0), (0, 0))
-        self._update_size = 2*state_size[0]*state_size[1] + 1
+        num = (state_size[0] // 2)*(state_size[1] // 2)*3
+        self._update_size = 2*num + 1
 
     def find_states(self, state: np.ndarray):
         # shape: (Dp, L, W)
@@ -105,37 +106,36 @@ class Heisenberg2DKagome():
         cnt = 0
         for r in range(L):
             for c in range(W):
-                fac = 1
-                if r%2 == 0 and c%2 == 0:
-                    nearest_neighbors = self._00_nn
-                elif r%2 == 0 and c%2 == 1:
-                    nearest_neighbors = self._01_nn
-                elif r%2 == 1 and c%2 == 0:
-                    nearest_neighbors = self._10_nn
-                elif r%2 == 1 and c%2 == 1:
-                    nearest_neighbors = self._11_nn
-                    fac = 0
-                
-                for dr, dc in nearest_neighbors:
-                    rr, cc = r + dr, c + dc
-                    if rr >= L or cc >= W:
-                        if self._pbc:
-                            rr %= L
-                            cc %= W
-                        else:
-                            continue
-                    if np.sum(state[:, r, c] * state[:, rr, cc]) != 1:
-                        temp = state.copy()
+                if r%2 == 1 and c%2 == 1:
+                    continue
+                else:
+                    if r%2 == 0 and c%2 == 0:
+                        nearest_neighbors = self._00_nn
+                    elif r%2 == 0 and c%2 == 1:
+                        nearest_neighbors = self._01_nn
+                    elif r%2 == 1 and c%2 == 0:
+                        nearest_neighbors = self._10_nn
+                    
+                    for dr, dc in nearest_neighbors:
+                        rr, cc = r + dr, c + dc
+                        if rr >= L or cc >= W:
+                            if self._pbc:
+                                rr %= L
+                                cc %= W
+                            else:
+                                continue
+                        if np.sum(state[:, r, c] * state[:, rr, cc]) != 1:
+                            temp = state.copy()
 
-                        # This is the correct way of swapping states when
-                        # temp.ndim > 2.
-                        temp[:, [r, rr], [c, cc]] = temp[:, [rr, r], [cc, c]]
-                        states[cnt] = temp
-                        coeffs[cnt] = 0.5
-                        diag -= 0.25*fac
-                    else:
-                        diag += 0.25*fac
-                    cnt +=1
+                            # This is the correct way of swapping states when
+                            # temp.ndim > 2.
+                            temp[:, [r, rr], [c, cc]] = temp[:, [rr, r], [cc, c]]
+                            states[cnt] = temp
+                            coeffs[cnt] = 0.5
+                            diag -= 0.25
+                        else:
+                            diag += 0.25
+                        cnt += 1
         states[-1] = state.copy()
         coeffs[-1] = diag
         return states, coeffs

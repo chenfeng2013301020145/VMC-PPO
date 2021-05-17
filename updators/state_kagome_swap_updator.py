@@ -49,7 +49,7 @@ if __name__ == "__main__":
     sys.path.append('..')
     from ops.HS_spin2d_Kagome import get_init_state
     
-    state_size = [4,4,2]
+    state_size = [2,2,2]
     state0, ms = get_init_state(state_size)
     print(state0[0])
     print(state0[0].sum(0))
@@ -58,3 +58,13 @@ if __name__ == "__main__":
     print(masks[0])
     state_update = test._get_update(state0[0], masks[0])
     print(state_update)
+    
+    def onehot2value(state, Dp): 
+        state_v = np.arange(0,Dp).reshape(Dp,1,1,1)*state
+        return np.sum(state_v,0).astype(dtype=np.int8)
+
+    state3 = test.state2_to_state3(state0[0])
+    print(state3.shape)
+    print(state3.shape)
+    state_v3 = onehot2value(state3, 2)
+    print(state_v3)
