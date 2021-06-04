@@ -35,13 +35,13 @@ state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=Heisenberg2DSquare, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_func=identity, momentum=[1,0])
+net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_funcs=[identity], momentum=[0,0])
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
 output_fn ='HS_2d_sq_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed =0,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed = 0, batch_size = 2000,
         learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d',
         net_args=net_args, threads=args.threads, input_fn=input_fn, 
         output_fn=output_fn, target_dfs=args.dfs, sample_division=5)

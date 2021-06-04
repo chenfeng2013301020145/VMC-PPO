@@ -5,7 +5,7 @@ sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
-from updators.state_swap_updator import updator
+from updators.state_kagome_swap_updator import updator
 from ops.HS_spin2d_Kagome import Heisenberg2DKagome, get_init_state, value2onehot
 from ops.HS_spin2d_Kagome import state2_to_state3, state3_to_state2
 from algos.complex_ppo import train
@@ -33,19 +33,20 @@ parser.add_argument('--dfs', type=float, default=10)
 args = parser.parse_args()
 
 state_size = [args.lattice_length, args.lattice_width, args.Dp]
-TolSite = args.lattice_length*args.lattice_width
+TolSite = (state_size[0]//2)*(state_size[1]//2)*3
 Ops_args = dict(hamiltonian=Heisenberg2DKagome, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_func=identity, momentum=[0,0])
+net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_funcs=[identity], stride0=[2], momentum=[0,0])
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
 output_fn ='HS_2d_Ka_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed =0,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed = 2867,
         learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d',
         net_args=net_args, threads=args.threads, input_fn=input_fn, 
-        output_fn=output_fn, target_dfs=args.dfs, sample_division=5)
+        output_fn=output_fn, target_dfs=args.dfs, sample_division=5, 
+        TolSite=TolSite)
 # print(state0.shape)
 calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model,
             state0=state0, n_sample=args.n_sample, updator=updator,
@@ -88,7 +89,7 @@ def b_check():
 
     for i, state3 in enumerate(basis_state):
         state2 = state3_to_state2(value2onehot(state3, Dp), state_size)
-        state_onehots[i] = torch.from_numpy(value2onehot(state2, Dp))
+        state_onehots[i] = torch.from_numpy(state2)
 
     # state_onehots[:,:,-1] = state_onehots[:,:,0]
     # state_onehots = state_onehots[spin_number.argsort(),:,:]

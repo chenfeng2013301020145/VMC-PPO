@@ -105,10 +105,11 @@ class cal_op():
         return AvgOp_real + 1j*AvgOp_imag, StdOp, len(self._states)
 
 def onehot2value(state, Dp, dimensions): 
+    state = np.squeeze(state,0) if state.shape[0] == 1 else state
     if dimensions == 1:
-        state_v = np.arange(0,Dp).reshape(Dp,1)*np.squeeze(state, 0)
+        state_v = np.arange(0,Dp).reshape(Dp,1)*state
     else:
-        state_v = np.arange(0,Dp).reshape(Dp,1,1)*np.squeeze(state, 0)
+        state_v = np.arange(0,Dp).reshape(Dp,1,1)*state
     return np.sum(state_v,0).astype(dtype=np.int8)
 
 class Sz():

@@ -31,8 +31,8 @@ class train_Ops:
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=2000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.01, save_freq=10, sample_freq=5, net_args=dict(), threads=4, 
-          seed=0, input_fn=0, load_state0=True, output_fn='test'):
+          sample_division=5, target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, 
+          seed=0, input_fn=0, load_state0=True, output_fn='test', TolSite=1):
     """
     main training process
     wavefunction: psi = phi*exp(1j*theta)
@@ -72,10 +72,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     logger = get_logger(os.path.join(output_dir, 'exp_log.txt'))
 
     if dimensions == '1d':
-        TolSite = state_size[0]  # number of sites
+        TolSite = state_size[0] if TolSite == 1 else TolSite
         single_state_shape = [state_size[0]]
     else:
-        TolSite = state_size[0]*state_size[1]
+        TolSite = state_size[0]*state_size[1] if TolSite == 1 else TolSite
         single_state_shape = [state_size[0], state_size[1]]
     Dp = state_size[-1]  # number of physical spins
 

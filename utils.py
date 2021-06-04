@@ -162,7 +162,7 @@ def get_logger(filename, verbosity=1, name=None):
     logger.setLevel(level_dict[verbosity])
 
     fh = logging.FileHandler(filename, "w")
-    fh.setFormatter(formatter)
+    fh.setFormatter(formatter) 
     logger.addHandler(fh)
 
     sh = logging.StreamHandler()
@@ -170,6 +170,17 @@ def get_logger(filename, verbosity=1, name=None):
     logger.addHandler(sh)
 
     return logger
+
+def rot60(A, dims=[0,1],center=[0]):
+    input_shape = A.shape
+    L = A.shape[dims[0]]
+    W = A.shape[dims[1]]
+    A = A.reshape(-1,L,W)
+    
+    X, Y = torch.meshgrid(torch.arange(W), torch.arange(L))
+    B = A.clone()        
+    B[:, (X-Y+center[0])%L, X] = A[:, X, Y]
+    return B.reshape(input_shape)
 
 def decimalToAny(n,x):
     # a=[0,1,2,3,4,5,6,7,8,9,'A','b','C','D','E','F']

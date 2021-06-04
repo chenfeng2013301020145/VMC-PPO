@@ -1,8 +1,11 @@
 # encoding: utf-8
+import sys
+sys.path.append('..')
 
 import torch.nn as nn
 import torch
 import numpy as np
+from utils import rot60
 # from utils import extract_weights,load_weights
 
 def periodic_padding(x, kernel_size, dimensions):
@@ -290,20 +293,25 @@ class OutPut_complex_layer(nn.Module):
         # variance scaling 
         norm = np.sqrt(np.prod(x.shape[2:]))
         x = x.sum(dim=2)/norm
-        x = translation_phase(x, k=self.momentum, dimensions=self.dimensions)
-        x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
-        z = x[:,0] + 1j*x[:,1]
-        z = torch.log(z)
+        if self._pbc:
+            x = translation_phase(x, k=self.momentum, dimensions=self.dimensions)
+            x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
+            z = x[:,0] + 1j*x[:,1]
+            z = torch.log(z)
+        else:
+            x = x.sum(2) if self.dimensions=='1d' else x.sum(dim=[2,3])
+            z = x[:,0] + 1j*x[:,1]
         return torch.stack((z.real, z.imag), dim=1)
     
 #--------------------------------------------------------------------
-def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
-        complex_nn=False, inverse_sym=False, relu_type='selu', pbc=True, bias=True, momentum=[1,0]):
+def mlp_cnn(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1, act=nn.ReLU,
+        complex_nn=False, relu_type='selu', pbc=True, bias=True, momentum=[1,0]):
     '''Input: State (batch_size, Dp, N) for 1d lattice,
                     (batch_size, Dp, L, W) for 2d lattice.
        Output: [logphis, thetas].
     '''
     K = K[0] if type(K) is list and len(K) == 1 else K
+    stride0 = stride0[0] if type(stride0) is list and len(stride0) == 1 else stride0
     stride = stride[0] if type(stride) is list and len(stride) == 1 else stride
     dim = len(state_size) - 1
     dimensions = '1d' if dim == 1 else '2d'
@@ -312,7 +320,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activati
     if complex_nn:
         Dp = state_size[-1]
 
-        input_layer = CNN_complex_layer(K=K, F_in=Dp, F_out=F[0], stride=stride, layer_name='1st', dimensions=dimensions,
+        input_layer = CNN_complex_layer(K=K, F_in=Dp, F_out=F[0], stride=stride0, layer_name='1st', dimensions=dimensions,
                                         relu_type=relu_type, pbc=pbc, bias=bias)
         output_layer = OutPut_complex_layer(K,F[-1], pbc=pbc, dimensions=dimensions, momentum=momentum)
 
@@ -362,6 +370,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activati
 
 # physical symmetry 
 # -------------------------------------------------------------------------------------------------
+# symmetry functions
 def translation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     dimension = len(x.shape) - 2
@@ -401,20 +410,6 @@ def inverse(x):
 def identity(x):
     return x, 1
 
-def reflection(x):
-    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
-    dimension = len(x.shape) - 2
-    if dimension == 1:
-        N = 2
-        x_flr = torch.flip(x, dims=[2])
-        return torch.stack((x, x_flr), dim=1).reshape([-1] + list(x.shape[1:])), N
-    else:
-        N = 4
-        x_flr = torch.flip(x, dims=[2])
-        x_fud = torch.flip(x, dims=[3])
-        x_flrud = torch.flip(x, dims=[2,3])
-        return torch.stack((x, x_flr, x_fud, x_flrud), dim=1).reshape([-1] + list(x.shape[1:])), N
-
 def c2rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     dimension = len(x.shape) - 2
@@ -433,16 +428,20 @@ def transpose(x):
         N = 2
         xT = torch.transpose(x, 2, 3)
         return torch.stack((x, xT), dim=1).reshape([-1] + list(x.shape[1:])), N
-    
-def transpose2(x):
+
+def c6rotation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     dimension = len(x.shape) - 2
     if dimension == 1 or x.shape[-1] != x.shape[-2]:
         raise ValueError('Only 2D square-shape lattice can be transposed.')
     else:
-        N = 3
-        xT = torch.transpose(x, 2, 3)
-        xT2 = torch.rot90(torch.transpose(torch.rot90(x, 1, dims=[2,3]), 2, 3), -1, dims=[2,3])
-        return torch.stack((x, xT, xT2), dim=1).reshape([-1] + list(x.shape[1:])), N
+        N = 6
+        x60 = rot60(x, dims=[2,3], center=[0])
+        x120 = rot60(x60, dims=[2,3], center=[0])
+        x180 = rot60(x120, dims=[2,3], center=[0])
+        x240 = rot60(x180, dims=[2,3], center=[0])
+        x300 = rot60(x240, dims=[2,3], center=[0])
+    return torch.stack((x,x60,x120,x180,x240,x300), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 def c4rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -456,13 +455,29 @@ def c4rotation(x):
         x270 = torch.rot90(x, 3, dims=[2,3])
         return torch.stack((x, x90, x180, x270), dim=1).reshape([-1] + list(x.shape[1:])), N
     
+def c3rotation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
+    dimension = len(x.shape) - 2
+    if dimension == 1 or x.shape[-1] != x.shape[-2]:
+        raise ValueError('Only 2D square-shape lattice can be transposed.')
+    else:
+        N = 3
+        x60 = rot60(x, dims=[2,3], center=[0])
+        x120 = rot60(x60, dims=[2,3], center=[0])
+        x180 = rot60(x120, dims=[2,3], center=[0])
+        x240 = rot60(x180, dims=[2,3], center=[0])
+    return torch.stack((x, x120, x240), dim=1).reshape([-1] + list(x.shape[1:])), N
+
+# -------------------------------------------------------------------------------------------------
+# symmetry network
+
 class sym_model(nn.Module):
-    def __init__(self, state_size, K, F=[4,3,2], stride=[1], output_size=1, 
-                output_activation=False, act=nn.ReLU, complex_nn=False, relu_type='selu', 
+    def __init__(self, state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1, 
+                act=nn.ReLU, complex_nn=False, relu_type='selu', 
                 pbc=True, bias=True, momentum=[0,0], sym_funcs=[identity]):
         super(sym_model,self).__init__()
-        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
-                    output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
+        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride0=stride0, stride=stride, 
+                    output_size=output_size, act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum)
         self.sym_funcs = sym_funcs
     
@@ -479,14 +494,14 @@ class sym_model(nn.Module):
         sym_x = self.model(sym_x)
         sym_x = sym_x.reshape(x.shape[0], N, 2)
         z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
-        z = torch.exp(z).sum(dim=1)
+        z = torch.exp(z).mean(dim=1)
         z = torch.log(z)
         return torch.stack((z.real, z.imag),dim=1)
 
-def mlp_cnn_sym(state_size, K, F=[4,3,2], stride=[1], output_size=1, output_activation=False, act=nn.ReLU,
+def mlp_cnn_sym(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1, act=nn.ReLU,
         complex_nn=False, relu_type='selu', pbc=True, bias=True, momentum=[0,0], sym_funcs=[identity]):
-    model = sym_model(state_size=state_size, K=K, F=F, stride=stride, output_size=output_size, 
-                    output_activation=output_activation, act=act, complex_nn=complex_nn, relu_type=relu_type, 
+    model = sym_model(state_size=state_size, K=K, F=F, stride0=stride0, stride=stride, output_size=output_size, 
+                    act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum, sym_funcs=sym_funcs)
     name_index = 1
     return model, name_index
@@ -498,30 +513,30 @@ if __name__ == '__main__':
     seed = 286
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
+    logphi_model, _ = mlp_cnn_sym([4,4,2], 4, [2,2], stride0=[1], stride=[1], complex_nn=True,
                            output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, identity])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
     import sys
     sys.path.append('..')
-    from ops.HS_spin2d import get_init_state
-    state0,_ = get_init_state([6,6,2], kind='rand', n_size=500)
+    from ops.HS_spin2d_Kagome import get_init_state
+    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
-    state_t0 = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),3, dims=[2,3])
+    state_t0 = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),0, dims=[2,3])
     print(state_t0)
     # print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
     #print(state0.shape)
     print(logphi_model(state_t0))
     # print(logphi_model(torch.from_numpy(state0).float())[:3])
-    state_t = torch.roll(state_t0, shifts=1, dims=2)
+    state_t = torch.roll(state_t0, shifts=2, dims=2)
     # state_t = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),2, dims=[2,3])
     print(state_t)
     print(logphi_model(state_t))
-    logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[identity])
-    logphi_model_sym.load_state_dict(logphi_model.state_dict())
+    #logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
+    #                       output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[identity])
+    #logphi_model_sym.load_state_dict(logphi_model.state_dict())
     # logphi_model_sym.eval()
     #print(logphi_model_sym(torch.from_numpy(state0).float())[1])
     # print(list(logphi_model(torch.from_numpy(state0).float()).size()))
