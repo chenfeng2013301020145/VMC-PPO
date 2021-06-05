@@ -171,15 +171,18 @@ def get_logger(filename, verbosity=1, name=None):
 
     return logger
 
-def rot60(A, dims=[0,1],center=[0]):
+def rot60(A, num=1, dims=[0,1],center=[0]):
     input_shape = A.shape
     L = A.shape[dims[0]]
     W = A.shape[dims[1]]
     A = A.reshape(-1,L,W)
     
     X, Y = torch.meshgrid(torch.arange(W), torch.arange(L))
-    B = A.clone()        
-    B[:, (X-Y+center[0])%L, X] = A[:, X, Y]
+    B = A.clone()   
+    Xrot, Yrot = X, Y
+    for _ in range(num):
+        Xrot, Yrot = (Xrot - Yrot + center[0])%L, Xrot
+    B[:, Xrot, Yrot] = A[:, X, Y]
     return B.reshape(input_shape)
 
 def decimalToAny(n,x):

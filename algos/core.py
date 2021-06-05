@@ -410,16 +410,6 @@ def inverse(x):
 def identity(x):
     return x, 1
 
-def c2rotation(x):
-    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
-    dimension = len(x.shape) - 2
-    N = 2
-    if dimension == 1:
-        x180 = torch.rot90(x, 2, dims=[2])
-    else:
-        x180 = torch.rot90(x, 2, dims=[2, 3])
-    return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
-
 def transpose(x):
     dimension = len(x.shape) - 2
     if dimension == 1 or x.shape[-1] != x.shape[-2]:
@@ -436,11 +426,11 @@ def c6rotation(x):
         raise ValueError('Only 2D square-shape lattice can be transposed.')
     else:
         N = 6
-        x60 = rot60(x, dims=[2,3], center=[0])
-        x120 = rot60(x60, dims=[2,3], center=[0])
-        x180 = rot60(x120, dims=[2,3], center=[0])
-        x240 = rot60(x180, dims=[2,3], center=[0])
-        x300 = rot60(x240, dims=[2,3], center=[0])
+        x60 = rot60(x, num=1, dims=[2,3], center=[0])
+        x120 = rot60(x, num=2, dims=[2,3], center=[0])
+        x180 = rot60(x, num=3, dims=[2,3], center=[0])
+        x240 = rot60(x, num=4, dims=[2,3], center=[0])
+        x300 = rot60(x, num=5, dims=[2,3], center=[0])
     return torch.stack((x,x60,x120,x180,x240,x300), dim=1).reshape([-1] + list(x.shape[1:])), N
     
 def c4rotation(x):
@@ -462,11 +452,19 @@ def c3rotation(x):
         raise ValueError('Only 2D square-shape lattice can be transposed.')
     else:
         N = 3
-        x60 = rot60(x, dims=[2,3], center=[0])
-        x120 = rot60(x60, dims=[2,3], center=[0])
-        x180 = rot60(x120, dims=[2,3], center=[0])
-        x240 = rot60(x180, dims=[2,3], center=[0])
+        x120 = rot60(x, num=2, dims=[2,3], center=[1])
+        x240 = rot60(x, num=4, dims=[2,3], center=[1])
     return torch.stack((x, x120, x240), dim=1).reshape([-1] + list(x.shape[1:])), N
+
+def c2rotation(x):
+    # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
+    dimension = len(x.shape) - 2
+    N = 2
+    if dimension == 1:
+        x180 = torch.rot90(x, 2, dims=[2])
+    else:
+        x180 = torch.rot90(x, 2, dims=[2, 3])
+    return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
 
 # -------------------------------------------------------------------------------------------------
 # symmetry network
@@ -524,16 +522,20 @@ if __name__ == '__main__':
     state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
-    state_t0 = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),0, dims=[2,3])
+    state_t0 = rot60(torch.from_numpy(state0[0][None,...]).float(), num=4, dims=[2,3], center=[1])
+    t1 = rot60(torch.from_numpy(state0[0][None,...]).float(), num=3, dims=[2,3], center=[1])
+    t2 = rot60(t1, num=1, dims=[2,3], center=[1])
+    print(state0[0])
     print(state_t0)
+    print(t2- state_t0)
     # print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
     #print(state0.shape)
-    print(logphi_model(state_t0))
+    #print(logphi_model(state_t0))
     # print(logphi_model(torch.from_numpy(state0).float())[:3])
-    state_t = torch.roll(state_t0, shifts=2, dims=2)
+    #state_t = torch.roll(state_t0, shifts=2, dims=2)
     # state_t = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),2, dims=[2,3])
-    print(state_t)
-    print(logphi_model(state_t))
+    #print(state_t)
+    #print(logphi_model(state_t))
     #logphi_model_sym, _ = mlp_cnn_sym([4,4,2], 2, [2,2], stride=[1], complex_nn=True,
     #                       output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[identity])
     #logphi_model_sym.load_state_dict(logphi_model.state_dict())
