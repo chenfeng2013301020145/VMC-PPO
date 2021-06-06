@@ -9,12 +9,17 @@ from torch import nn, Tensor
 from typing import List, Tuple, Dict, Union, Callable
 
 class SampleBuffer:
-    def __init__(self, device):
+    def __init__(self, device, state_size):
         """
         A buffer for storing samples from Markov chain sampler, keeping the most
         probable sample for the next policy update.
         """
         self._device = device
+        if len(state_size) == 2:
+            self.single_state_shape = [state_size[0]]
+        else:
+            self.single_state_shape = [state_size[0], state_size[1]]
+        self.Dp = state_size[-1]  # number of physical spins
 
     def update(self,states, logphis, thetas, counts, update_states, update_coeffs):
         self.states = states
@@ -26,16 +31,18 @@ class SampleBuffer:
         self._call_time = 0
         return
     
-    def get_energy_ops(self, model, Dp, single_state_shape):
+    def get_energy_ops(self, model):
         logphi = torch.from_numpy(self.logphis).to(self._device)
         theta = torch.from_numpy(self.thetas).to(self._device)
         
         n_sample = self.update_states.shape[0]
         n_updates = self.update_states.shape[1]
-        op_states = self.update_states.reshape([-1, Dp]+single_state_shape)
-        psi_ops = model(torch.from_numpy(op_states).float().to(self._device))
-        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+        op_states = self.update_states.reshape([-1, self.Dp]+self.single_state_shape)
+        op_states = torch.from_numpy(op_states).float().to(self._device)
+        op_states_unique, inverse_indices = torch.unique(op_states,return_inverse=True,dim=0)
+        psi_ops = model(op_states_unique)
+        logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi[...,None]*torch.ones_like(logphi_ops)
         delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.5*n_sample))
@@ -72,13 +79,20 @@ class SampleBuffer:
 
             gpu_states = torch.from_numpy(states).float().to(self._device)
             gpu_counts = torch.from_numpy(counts).float().to(self._device)
-            gpu_update_states = torch.from_numpy(update_states).float().to(self._device)
+            # gpu_update_states = torch.from_numpy(update_states).float().to(self._device)
             gpu_update_coeffs = torch.from_numpy(update_coeffs).float().to(self._device)
             gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
             gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
-
-            return dict(state=gpu_states, count=gpu_counts, update_states=gpu_update_states,
-                        update_coeffs=gpu_update_coeffs, logphi0=gpu_logphi0, theta0=gpu_theta0)
+            
+            # save GPU memory with unique array
+            update_states = torch.from_numpy(update_states).float().to(self._device).reshape([-1, self.Dp]+self.single_state_shape)
+            gpu_update_states_unique, inverse_indices = torch.unique(update_states,return_inverse=True,dim=0)
+            #gpu_update_states_unique = update_states_unique.to(self._device)
+            #inverse_indices = inverse_indices.to(self._device)
+            
+            return dict(state=gpu_states, count=gpu_counts, update_coeffs=gpu_update_coeffs, 
+                        logphi0=gpu_logphi0, theta0=gpu_theta0,
+                        update_states_unique=gpu_update_states_unique, inverse_indices=inverse_indices)
         else:
             states = self.states[batch_label]
             logphis = self.logphis[batch_label]

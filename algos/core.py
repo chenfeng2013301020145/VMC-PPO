@@ -489,8 +489,12 @@ class sym_model(nn.Module):
     # apply symmetry
     def forward(self, x):
         sym_x, N = self.symmetry(x)
-        sym_x = self.model(sym_x)
-        sym_x = sym_x.reshape(x.shape[0], N, 2)
+        #sym_x = self.model(sym_x)
+        #sym_x = sym_x.reshape(x.shape[0], N, 2)
+        # save GPU memory with unique array
+        sym_x_unique, inverse_indices = torch.unique(sym_x,return_inverse=True,dim=0)
+        sym_x_unique = self.model(sym_x_unique)
+        sym_x = sym_x_unique[inverse_indices].reshape(x.shape[0],N,2)
         z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
         z = torch.exp(z).mean(dim=1)
         z = torch.log(z)
@@ -504,7 +508,6 @@ def mlp_cnn_sym(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1
     name_index = 1
     return model, name_index
 
-    
 # ------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
     # logphi_model = CNNnet_1d(10,2)
@@ -519,7 +522,7 @@ if __name__ == '__main__':
     import sys
     sys.path.append('..')
     from ops.HS_spin2d_Kagome import get_init_state
-    state0,_ = get_init_state([4,4,2], kind='rand', n_size=500)
+    state0,_ = get_init_state([4,4,2], kind='rand', n_size=100)
     state_zero = torch.from_numpy(state0[0][None,...])
     state_zero = torch.stack((state_zero, torch.zeros_like(state_zero)), dim=1)
     state_t0 = rot60(torch.from_numpy(state0[0][None,...]).float(), num=4, dims=[2,3], center=[1])
@@ -527,10 +530,16 @@ if __name__ == '__main__':
     t2 = rot60(t1, num=1, dims=[2,3], center=[1])
     print(state0[0])
     print(state_t0)
-    print(t2- state_t0)
+    print(t2 - state_t0)
     # print(complex_periodic_padding(state_zero, [3,3], [1,1], dimensions='2d'))
     #print(state0.shape)
-    #print(logphi_model(state_t0))
+    import time
+    tic = time.time()
+    tt = logphi_model(torch.from_numpy(state0).float()).detach().numpy()
+    print(tt)
+    print(time.time() - tic)
+    #import scipy.io as sio
+    #sio.savemat('test2.mat', {'tt2':tt})
     # print(logphi_model(torch.from_numpy(state0).float())[:3])
     #state_t = torch.roll(state_t0, shifts=2, dims=2)
     # state_t = torch.rot90(torch.from_numpy(state0[0][None,...]).float(),2, dims=[2,3])

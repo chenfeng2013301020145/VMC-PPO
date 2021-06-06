@@ -76,7 +76,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     _ham = train_ops._ham(**Ham_args)
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
-    buffer = SampleBuffer(gpu) 
+    buffer = SampleBuffer(gpu, state_size) 
 
     psi_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args)
     psi_model.to(gpu)
@@ -101,19 +101,17 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # mean energy from importance sampling in GPU
     def _energy_ops(sample_division):
         data = buffer.get(batch_type='equal', sample_division=sample_division)
-        states, counts, op_states, op_coeffs = data['state'], data['count'], data['update_states'], data['update_coeffs']
+        states, counts = data['state'], data['count']
+        op_coeffs, op_states_unique, inverse_indices \
+            = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
 
         with torch.no_grad():
-            n_sample = op_states.shape[0]
-            n_updates = op_states.shape[1]
-            op_states = op_states.reshape([-1, Dp] + single_state_shape)
+            n_sample = op_coeffs.shape[0]
+            n_updates = op_coeffs.shape[1]
+            psi_ops = psi_model(op_states_unique)
+            logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
+            theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
-            # psi_ops = logphi_model(op_states)
-            psi_ops = psi_model(op_states)
-            logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-            theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
-
-            # psi = logphi_model(states)
             psi = psi_model(states)
             logphi = psi[:, 0].reshape(len(states), -1)
             theta = psi[:, 1].reshape(len(states), -1)
@@ -129,7 +127,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     # imaginary time propagation: delta_t = learning_rate
     def update_one_step(data, epsilon):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
-        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        op_coeffs, op_states_unique, inverse_indices \
+            = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
         # psi = logphi_model(state)
         psi = psi_model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -142,13 +141,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         weights_norm = weights.sum()
         weights = (weights/weights_norm).detach()
         
-        n_sample = op_states.shape[0]
-        n_updates = op_states.shape[1]
-        op_states = op_states.reshape([-1, Dp] + single_state_shape)
-        # psi_ops = logphi_model(op_states)
-        psi_ops = psi_model(op_states)
-        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+        n_sample = op_coeffs.shape[0]
+        n_updates = op_coeffs.shape[1]
+        psi_ops = psi_model(op_states_unique)
+        logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
@@ -312,6 +309,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
 
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
+            torch.cuda.empty_cache()
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             torch.save(psi_model.state_dict(), os.path.join(save_dir, 'model_'+str(epoch)+'.pkl'))

@@ -83,7 +83,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     _ham = train_ops._ham(**Ham_args)
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
-    buffer = SampleBuffer(gpu)
+    buffer = SampleBuffer(gpu, state_size)
 
     psi_model, name_index = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
     psi_model.to(gpu)
@@ -109,16 +109,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     def _energy_ops(sample_division):
         data = buffer.get(batch_type='equal', sample_division=sample_division)
         states, counts  = data['state'], data['count']
-        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        op_coeffs, op_states_unique, inverse_indices \
+            = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
         
         with torch.no_grad():
-            n_sample = op_states.shape[0]
-            n_updates = op_states.shape[1]
-            op_states = op_states.reshape([-1, Dp] + single_state_shape)
+            n_sample = op_coeffs.shape[0]
+            n_updates = op_coeffs.shape[1]
+            # op_states = op_states.reshape([-1, Dp] + single_state_shape)
 
-            psi_ops = psi_model(op_states.float())
-            logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-            theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+            # op_states_unique, inverse_indices = torch.unique(op_states,return_inverse=True,dim=0)
+            psi_ops = psi_model(op_states_unique)
+            logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
+            theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
             psi = psi_model(states.float())
             logphi = psi[:, 0].reshape(len(states), -1)
@@ -165,7 +167,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     # define the loss function according to the energy functional in GPU
     def compute_loss_energy(model, data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
-        op_states, op_coeffs = data['update_states'], data['update_coeffs']
+        op_coeffs, op_states_unique, inverse_indices \
+            = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
         # ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state)
@@ -182,12 +185,13 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the coeffs of the energy
-        n_sample = op_states.shape[0]
-        n_updates = op_states.shape[1]
-        op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        psi_ops = model(op_states.float())
-        logphi_ops = psi_ops[:, 0].reshape(n_sample, n_updates)
-        theta_ops = psi_ops[:, 1].reshape(n_sample, n_updates)
+        n_sample = op_coeffs.shape[0]
+        n_updates = op_coeffs.shape[1]
+        #op_states = op_states.reshape([-1, Dp]+single_state_shape)
+        #op_states_unique, inverse_indices = torch.unique(op_states,return_inverse=True,dim=0)
+        psi_ops = model(op_states_unique)
+        logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
+        theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
         # delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.25*n_sample))
@@ -332,6 +336,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
+            torch.cuda.empty_cache()
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             torch.save(psi_model.state_dict(), os.path.join(save_dir, 'model_'+str(epoch)+'.pkl'))

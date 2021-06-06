@@ -6,9 +6,6 @@ import numpy as np
 import multiprocessing
 import os
 
-os.environ["OMP_NUM_THREADS"] = "1"
-torch.set_num_threads(1)
-torch.set_num_interop_threads(1)
 
 def _generate_updates(state, operator):
     """
@@ -154,6 +151,10 @@ class MCsampler():
             logphis of the sample state: logphi_list
             thetas of the sample state: theta_list
         """
+        os.environ["OMP_NUM_THREADS"] = "1"
+        torch.set_num_threads(1)
+        # torch.set_num_interop_threads(1)
+
         if self._warmup:
             self._state0 = self.warmup_sample(n_sample = 5000)
         else:
