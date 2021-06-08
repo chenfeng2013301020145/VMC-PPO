@@ -115,9 +115,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         with torch.no_grad():
             n_sample = op_coeffs.shape[0]
             n_updates = op_coeffs.shape[1]
-            # op_states = op_states.reshape([-1, Dp] + single_state_shape)
 
-            # op_states_unique, inverse_indices = torch.unique(op_states,return_inverse=True,dim=0)
             psi_ops = psi_model(op_states_unique)
             logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
             theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
@@ -169,7 +167,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
         op_coeffs, op_states_unique, inverse_indices \
             = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
-        # ops_real, ops_imag = data['ops_real'], data['ops_imag']
 
         psi = model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
@@ -180,23 +177,18 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         delta_logphi = delta_logphi - delta_logphi.mean()
         weights = count[...,None]*torch.exp(delta_logphi*2)
         weights = (weights/weights.sum()).detach()
-        clip_ws = count[...,None]*torch.clamp(torch.exp(delta_logphi*2), 
-                                         1-clip_ratio, 1+clip_ratio)
+        clip_ws = count[...,None]*torch.clamp(torch.exp(delta_logphi*2), 1-clip_ratio, 1+clip_ratio)
         clip_ws = (clip_ws/clip_ws.sum()).detach()
         
         # calculate the coeffs of the energy
         n_sample = op_coeffs.shape[0]
         n_updates = op_coeffs.shape[1]
-        #op_states = op_states.reshape([-1, Dp]+single_state_shape)
-        #op_states_unique, inverse_indices = torch.unique(op_states,return_inverse=True,dim=0)
         psi_ops = model(op_states_unique)
         logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
         theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
         delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
-        # delta_logphi_os = torch.clamp(delta_logphi_os, -30, np.log(0.25*n_sample))
         delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
-        # delta_theta_os = torch.fmod(delta_logphi_os, np.pi)
         ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
         ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
         
@@ -303,7 +295,6 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             = _get_unique_states(states, logphis,thetas, update_states, update_coeffs)
 
         buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
-        # buffer.get_energy_ops(model=psi_model, Dp=Dp, single_state_shape=single_state_shape)
 
         IntCount = len(states)
         sample_toc = time.time()
@@ -336,7 +327,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             torch.save(psi_model.state_dict(), os.path.join(save_dir, 'model_'+str(epoch)+'.pkl'))

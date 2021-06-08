@@ -31,7 +31,7 @@ class cal_op():
         self._sample_division = kwargs.get('sample_division', 5)
         self._state0 = kwargs.get('state0')
         self._run = 0
-        self._buff = SampleBuffer(gpu)
+        self._buff = SampleBuffer(gpu,self._state_size)
         
     def get_sample(self, op):
         self._sampler = MCsampler(state_size=self._state_size, model=self.psi_model, 
@@ -52,16 +52,17 @@ class cal_op():
 
     def _ops(self, sample_division):
         data = self._buff.get(batch_type='equal', sample_division=sample_division)
-        states, counts, uss, ucs = data['state'], data['count'], data['update_states'], data['update_coeffs']
+        states, counts  = data['state'], data['count']
+        uss_unique, ucs = data['update_states_unique'], data['update_coeffs']
+        inverse_indices = data['inverse_indices']
 
         with torch.no_grad():
-            n_sample = uss.shape[0]
-            n_updates = uss.shape[1]
-            uss = uss.reshape([-1] + self._single_state_shape)
+            n_sample = ucs.shape[0]
+            n_updates = ucs.shape[1]
 
-            psi_ops = self.psi_model(uss)
-            logphi_ops = psi_ops[:,0].reshape(n_sample, n_updates)
-            theta_ops = psi_ops[:,1].reshape(n_sample, n_updates)
+            psi_ops = self.psi_model(uss_unique)
+            logphi_ops = psi_ops[inverse_indices,0].reshape(n_sample, n_updates)
+            theta_ops = psi_ops[inverse_indices,1].reshape(n_sample, n_updates)
 
             psi = self.psi_model(states)
             logphi = psi[:,0].reshape(len(states),-1)

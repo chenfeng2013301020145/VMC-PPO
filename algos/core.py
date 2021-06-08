@@ -405,10 +405,12 @@ def inverse(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
     N = 2
     x_inverse = torch.flip(x, dims=[1])
-    return torch.stack((x, x_inverse), dim=1).reshape([-1] + list(x.shape[1:])), N
+    full_x = torch.stack((x, x_inverse), dim=1).reshape([-1] + list(x.shape[1:]))
+    full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+    return full_x_unique, inverse_indices, N
 
 def identity(x):
-    return x, 1
+    return x, torch.arange(x.shape[0]), 1
 
 def transpose(x):
     dimension = len(x.shape) - 2
@@ -417,7 +419,9 @@ def transpose(x):
     else:
         N = 2
         xT = torch.transpose(x, 2, 3)
-        return torch.stack((x, xT), dim=1).reshape([-1] + list(x.shape[1:])), N
+        full_x = torch.stack((x, xT), dim=1).reshape([-1] + list(x.shape[1:]))
+        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+        return full_x_unique, inverse_indices, N
 
 def c6rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -431,7 +435,9 @@ def c6rotation(x):
         x180 = rot60(x, num=3, dims=[2,3], center=[0])
         x240 = rot60(x, num=4, dims=[2,3], center=[0])
         x300 = rot60(x, num=5, dims=[2,3], center=[0])
-    return torch.stack((x,x60,x120,x180,x240,x300), dim=1).reshape([-1] + list(x.shape[1:])), N
+        full_x = torch.stack((x,x60,x120,x180,x240,x300), dim=1).reshape([-1] + list(x.shape[1:]))
+        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+        return full_x_unique, inverse_indices, N
     
 def c4rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -443,7 +449,9 @@ def c4rotation(x):
         x90 = torch.rot90(x, 1, dims=[2,3])
         x180 = torch.rot90(x, 2, dims=[2,3])
         x270 = torch.rot90(x, 3, dims=[2,3])
-        return torch.stack((x, x90, x180, x270), dim=1).reshape([-1] + list(x.shape[1:])), N
+        full_x = torch.stack((x, x90, x180, x270), dim=1).reshape([-1] + list(x.shape[1:]))
+        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+        return full_x_unique, inverse_indices, N
     
 def c3rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -454,7 +462,9 @@ def c3rotation(x):
         N = 3
         x120 = rot60(x, num=2, dims=[2,3], center=[1])
         x240 = rot60(x, num=4, dims=[2,3], center=[1])
-    return torch.stack((x, x120, x240), dim=1).reshape([-1] + list(x.shape[1:])), N
+        full_x = torch.stack((x, x120, x240), dim=1).reshape([-1] + list(x.shape[1:]))
+        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+        return full_x_unique, inverse_indices, N
 
 def c2rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -464,7 +474,9 @@ def c2rotation(x):
         x180 = torch.rot90(x, 2, dims=[2])
     else:
         x180 = torch.rot90(x, 2, dims=[2, 3])
-    return torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:])), N
+        full_x = torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:]))
+        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
+        return full_x_unique, inverse_indices, N
 
 # -------------------------------------------------------------------------------------------------
 # symmetry network
@@ -480,22 +492,23 @@ class sym_model(nn.Module):
         self.sym_funcs = sym_funcs
     
     def symmetry(self, x):
-        N = 1
+        inverse_indices = []
+        Nlist = []
         for func in self.sym_funcs:
-            x, n = func(x)
-            N *= n
-        return x, N       
+            x, symfunc_indices, n = func(x)
+            inverse_indices.append(symfunc_indices)
+            Nlist.append(n)
+        return x, inverse_indices, Nlist    
     
     # apply symmetry
     def forward(self, x):
-        sym_x, N = self.symmetry(x)
-        #sym_x = self.model(sym_x)
-        #sym_x = sym_x.reshape(x.shape[0], N, 2)
-        # save GPU memory with unique array
-        sym_x_unique, inverse_indices = torch.unique(sym_x,return_inverse=True,dim=0)
-        sym_x_unique = self.model(sym_x_unique)
-        sym_x = sym_x_unique[inverse_indices].reshape(x.shape[0],N,2)
-        z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
+        sym_x_unique, inverse_indices, Nlist = self.symmetry(x)
+        sym_x_unique = self.model(sym_x_unique).reshape(sym_x_unique.shape[0], 1, 2)
+        for i in range(len(inverse_indices)-1, -1, -1):
+            N = Nlist[i]*sym_x_unique.shape[1]
+            sym_x_unique = sym_x_unique[inverse_indices[i],:]
+            sym_x_unique = sym_x_unique.reshape((sym_x_unique.shape[0]*sym_x_unique.shape[1])//N, N, 2)
+        z = sym_x_unique[:,:,0] + 1j*sym_x_unique[:,:,1]
         z = torch.exp(z).mean(dim=1)
         z = torch.log(z)
         return torch.stack((z.real, z.imag),dim=1)
@@ -515,7 +528,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     logphi_model, _ = mlp_cnn_sym([4,4,2], 4, [2,2], stride0=[1], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, identity])
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, transpose])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
@@ -535,9 +548,14 @@ if __name__ == '__main__':
     #print(state0.shape)
     import time
     tic = time.time()
-    tt = logphi_model(torch.from_numpy(state0).float()).detach().numpy()
-    print(tt)
+    state0 = torch.from_numpy(state0).float()
+    state0r = torch.transpose(state0, 2, 3)
+    tt = logphi_model(state0).detach().numpy()
+    tt2 = logphi_model(state0r).detach().numpy()
+    print(np.max(tt - tt2))
     print(time.time() - tic)
+    
+        
     #import scipy.io as sio
     #sio.savemat('test2.mat', {'tt2':tt})
     # print(logphi_model(torch.from_numpy(state0).float())[:3])

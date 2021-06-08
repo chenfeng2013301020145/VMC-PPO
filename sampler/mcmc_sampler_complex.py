@@ -62,6 +62,7 @@ class MCsampler():
     def get_single_sample(self, state, logphi_i, theta_i, mask, rand, update_states, update_coeffs):
         with torch.no_grad():
             state_f = self._updator._get_update(state, mask)
+            
             psi_f = self._model(torch.from_numpy(state_f[None,...]).float()).numpy()
 
             logphi_f = psi_f[:,0]
