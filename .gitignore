@@ -2,5 +2,4 @@ ED.py
 ED_kagome.py
 /tests/data/*
 /results*
-/algos/core-test.py
-/sampler/symmetry.py
+/symmetry.py

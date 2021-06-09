@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 import multiprocessing
+from multiprocessing import cpu_count
 import logging
 import os
 from torch import nn, Tensor
@@ -185,7 +186,7 @@ def get_logger(filename, verbosity=1, name=None):
 
     return logger
 
-def rot60(A, num=1, dims=[0,1],center=[0]):
+def rot60(A, num=1, dims=[0,1], center=[0]):
     input_shape = A.shape
     L = A.shape[dims[0]]
     W = A.shape[dims[1]]
@@ -263,3 +264,20 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
     """
     for name, p in zip(names, params):
         _set_nested_attr(mod, name.split("."), p)
+        
+        
+def np_rot60(A, num=1, axes=[0,1],center=[0]):
+    input_shape = A.shape
+    L = A.shape[axes[0]]
+    W = A.shape[axes[1]]
+    A = A.reshape(-1,L,W)
+    
+    X, Y = np.meshgrid(np.arange(W), np.arange(L))
+    B = A.copy()   
+    Xrot, Yrot = X, Y
+    for _ in range(num):
+        Xrot, Yrot = (Xrot - Yrot + center[0])%L, Xrot
+    B[:, Xrot, Yrot] = A[:, X, Y]
+    return B.reshape(input_shape)
+
+
