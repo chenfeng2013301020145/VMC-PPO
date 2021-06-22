@@ -78,8 +78,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     updator = train_ops._updator
     buffer = SampleBuffer(gpu, state_size) 
 
-    psi_model = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args).to(gpu)
-    mh_model = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args)
+    psi_model = mlp_cnn(state_size=state_size, bias=False, **net_args).to(gpu)
+    mh_model = mlp_cnn(state_size=state_size, bias=False, **net_args)
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))
     logger.info('epsilion: {}'.format(epsilon))

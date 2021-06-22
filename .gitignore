@@ -3,11 +3,4 @@ ED_kagome.py
 ED_tfim.py
 /tests/data/*
 /results*
-/algos/core-beta-new.py
-/sampler/mcmc_sampler_complex-test.py
-/sampler/mcmc_sampler_complex-beta.py
 /sampler/mcmc_sampler_complex.py
-/algos/sym_class.py
-/algos/core-beta-test.py
-/algos/core-beta-old.py
-/symmetry.py

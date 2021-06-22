@@ -39,8 +39,8 @@ def random_train(epochs=100, net_args=dict(), Ops_args=dict(), seed=0, batch_siz
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
 
-    model, _ = mlp_cnn(state_size=state_size, complex_nn=True, **net_args).to(gpu)
-    mh_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, **net_args)
+    model = mlp_cnn(state_size=state_size, **net_args).to(gpu)
+    mh_model = mlp_cnn(state_size=state_size **net_args)
     print(model)
     print(get_paras_number(model))
 
@@ -122,14 +122,14 @@ def random_train(epochs=100, net_args=dict(), Ops_args=dict(), seed=0, batch_siz
 
 if __name__ =='__main__':
     from updators.state_swap_updator import updator
-    from operators.HS_spin2d import Heisenberg2DTriangle, get_init_state, value2onehot
+    from ops.HS_spin2d import Heisenberg2DTriangle, get_init_state, value2onehot
     import torch.nn as nn
-    from utils import decimalToAny
+    from utils_ppo import decimalToAny
 
     state_size = [3, 2, 2]
     Ops_args = dict(hamiltonian=Heisenberg2DTriangle, get_init_state=get_init_state, updator=updator)
     Ham_args = dict(state_size=state_size, pbc=True)
-    net_args = dict(K=2, F=[2,1], relu_type='softplus2', inverse_sym=False, bias=False)
+    net_args = dict(K=2, F=[2,1], relu_type='softplus2', bias=False)
     #input_mh_fn = 'HS_2d_tri_L3W4_SR/save_model/model_199.pkl'
     # input_fn = 'HS_2d_sq_L3W2/save_model/model_199.pkl'
     # output_fn ='HS_2d_tri_L3W2_vmcppo'

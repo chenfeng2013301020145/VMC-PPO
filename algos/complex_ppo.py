@@ -84,9 +84,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     updator = train_ops._updator
     buffer = SampleBuffer(gpu, state_size)
 
-    psi_model = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args).to(gpu)
+    psi_model = mlp_cnn_sym(state_size=state_size, **net_args).to(gpu)
     # model for sampling
-    mh_model = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
+    mh_model = mlp_cnn_sym(state_size=state_size, **net_args)
 
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))

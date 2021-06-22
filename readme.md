@@ -24,7 +24,8 @@ Optimization object,
 where <img src="http://latex.codecogs.com/gif.latex?E_w"> is the energy estimated via importance sampling and <img src="http://latex.codecogs.com/gif.latex?D_{FS}"> is the Fubini-Study distance.
 
 ### PPO algorthim 
-    algos.pesudocomplex_ppo or algos.complex_ppo
+    algos.complex_ppo: no pre-train.
+    algos.complex_ppo2: calculate output of the model in the sampling process during the first few pre-training epochs.
 NGD can be approximately solved by PPO-clip and PPO-clip updates wavefunctions via,
 
 <div align=center><img src="http://latex.codecogs.com/gif.latex?w_{k+1} = {\rm argmin}_{w} \mathbb{E} [L(w_{k}, w)]"></div>
@@ -35,7 +36,7 @@ with the loss function,
 where <img src="http://latex.codecogs.com/gif.latex?E_w">  is estimated by the current wavefunction <img src="http://latex.codecogs.com/gif.latex?\Psi_w">  and <img src="http://latex.codecogs.com/gif.latex?E_{w_k}">  is estimated by the old wavefunction <img src="http://latex.codecogs.com/gif.latex?\Psi_{w_k}"> .
 
 ### Stochastic reconfiguration (TDVP)
-    algos.pesudocomplex_sr or algos.complex_sr
+    algos.complex_sr
 The optimization object of NGD is also equivalent to,
 <div align=center><img src="http://latex.codecogs.com/gif.latex?{\rm minimize}_{\Delta w} \big\{ E_w + \nabla_wE_w\Delta w \big\}~~{\rm s.t.}~~\frac{1}{2}\Delta w^{\dagger}{\bf S}\Delta \omega < \delta,"></div>
 due to,

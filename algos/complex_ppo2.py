@@ -30,8 +30,8 @@ class train_Ops:
 # ------------------------------------------------------------------------
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
-          learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=2000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, 
+          learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=2000, clip_ratio=0.1, 
+          target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, 
           seed=0, input_fn=0, load_state0=True, output_fn='test', TolSite=1):
     """
     main training process
@@ -85,10 +85,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     updator = train_ops._updator
     buffer = SampleBuffer(gpu, state_size)
 
-    psi_model, name_index = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
-    psi_model.to(gpu)
+    psi_model = mlp_cnn_sym(state_size=state_size, **net_args).to(gpu)
     # model for sampling
-    mh_model, _ = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
+    mh_model = mlp_cnn_sym(state_size=state_size, **net_args)
 
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))

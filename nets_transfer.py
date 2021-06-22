@@ -40,9 +40,8 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
     get_init_state = train_ops._get_init_state
     updator = train_ops._updator
 
-    small_model, _ = mlp_cnn_sym(state_size=state_size, **small_net_args)
-    small_model.to(gpu)
-    mh_model, _ = mlp_cnn_sym(state_size=state_size, **small_net_args)
+    small_model = mlp_cnn_sym(state_size=state_size, **small_net_args).to(gpu)
+    mh_model = mlp_cnn_sym(state_size=state_size, **small_net_args)
     print('original_model:')
     print(mh_model)
     print(get_paras_number(mh_model))
@@ -59,8 +58,7 @@ def transfer(epochs=100, small_net_args=dict(), big_net_args=dict(), Ops_args=di
             mat_content = sio.loadmat(os.path.join('./results',fn_name[0], 'state0.mat'))
             MHsampler.single_state0 = mat_content['state0']
 
-    big_model, _ = mlp_cnn_sym(state_size=state_size, **big_net_args)
-    big_model.to(gpu)
+    big_model = mlp_cnn_sym(state_size=state_size, **big_net_args).to(gpu)
     print('transferred_to:')
     print(big_model)
     print(get_paras_number(big_model))
@@ -131,14 +129,14 @@ if __name__ =='__main__':
     from ops.HS_spin2d import Heisenberg2DTriangle, get_init_state, value2onehot
     from ops.operators import cal_op
     import torch.nn as nn
-    from utils import decimalToAny
+    from utils_ppo import decimalToAny
 
     state_size = [2, 3, 2]
     TolSite = state_size[0]*state_size[1]
     Ops_args = dict(hamiltonian=Heisenberg2DTriangle, get_init_state=get_init_state, updator=updator)
     Ham_args = dict(state_size=state_size, pbc=True)
-    net_args = dict(K=2, F=[3,2], complex_nn=True, relu_type='softplus2')
-    mh_net_args = dict(K=2, F=[3], complex_nn=True, relu_type='softplus2')
+    net_args = dict(K=2, F=[3,2], relu_type='softplus2')
+    mh_net_args = dict(K=2, F=[3], relu_type='softplus2')
     input_mh_fn = 'HS_2d_tri_L2W2_vmcppo/save_model/model_99.pkl'
     # input_fn = 'HS_2d_sq_L3W2/save_model/model_199.pkl'
     output_fn ='HS_2d_tri_L2W3_vmcppo'
