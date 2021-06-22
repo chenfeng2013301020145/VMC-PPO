@@ -9,10 +9,9 @@ sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
-from sampler.mcmc_sampler_complex import MCsampler
-from algos.core import mlp_cnn, mlp_cnn_sym, get_paras_number, gradient
-from utils import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
-from torch.autograd.functional import jacobian
+from sampler.mcmc_sampler_complex_ppo import MCsampler
+from algos.core_v2 import mlp_cnn_sym, get_paras_number
+from utils_ppo import SampleBuffer, get_logger, _get_unique_states
 import scipy.io as sio
 import time
 import copy
@@ -31,7 +30,7 @@ class train_Ops:
 # main training function
 def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='rand', n_optimize=10,
           learning_rate=1E-4, state_size=[10, 2], dimensions='1d', batch_size=2000, clip_ratio=0.1,
-          sample_division=5, target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, 
+          target_dfs=0.01, save_freq=10, net_args=dict(), threads=4, 
           seed=0, input_fn=0, load_state0=True, output_fn='test', TolSite=1):
     """
     main training process
@@ -85,10 +84,9 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
     updator = train_ops._updator
     buffer = SampleBuffer(gpu, state_size)
 
-    psi_model, name_index = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
-    psi_model.to(gpu)
+    psi_model = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args).to(gpu)
     # model for sampling
-    mh_model, _ = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
+    mh_model = mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
 
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))
@@ -124,8 +122,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             logphi = psi[:, 0].reshape(len(states), -1)
             theta = psi[:, 1].reshape(len(states), -1)
 
-            delta_logphi_os = logphi_ops - logphi*torch.ones(logphi_ops.shape, device=gpu)
-            delta_theta_os = theta_ops - theta*torch.ones(theta_ops.shape, device=gpu)
+            delta_logphi_os = logphi_ops - logphi*torch.ones_like(logphi_ops)
+            delta_theta_os = theta_ops - theta*torch.ones_like(theta_ops)
             Es_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
             Es_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1)
 
@@ -163,12 +161,12 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         return dfs**2
     
     # define the loss function according to the energy functional in GPU
-    def compute_loss_energy(model, data):
+    def compute_loss_energy(data):
         state, count, logphi0  = data['state'], data['count'], data['logphi0']
         op_coeffs, op_states_unique, inverse_indices \
             = data['update_coeffs'], data['update_states_unique'], data['inverse_indices']
 
-        psi = model(state)
+        psi = psi_model(state)
         logphi = psi[:, 0].reshape(len(state), -1)
         theta = psi[:, 1].reshape(len(state), -1)
 
@@ -183,7 +181,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         # calculate the coeffs of the energy
         n_sample = op_coeffs.shape[0]
         n_updates = op_coeffs.shape[1]
-        psi_ops = model(op_states_unique)
+        psi_ops = psi_model(op_states_unique)
         logphi_ops = psi_ops[inverse_indices, 0].reshape(n_sample, n_updates)
         theta_ops = psi_ops[inverse_indices, 1].reshape(n_sample, n_updates)
 
@@ -195,51 +193,11 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         # calculate the mean energy
         me_real = (weights*ops_real[..., None]).sum().detach()
         cme_real = (clip_ws*ops_real[..., None]).sum().detach()
-        
-        E_re_re = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
-        cE_re_re = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
-        loss_re_re = 0.5*torch.max(weights*E_re_re, clip_ws*cE_re_re).sum()
-
-        E_re_im = ops_real[..., None]*theta - me_real*theta - ops_imag[..., None]*logphi
-        cE_re_im = ops_real[..., None]*theta - cme_real*theta - ops_imag[..., None]*logphi
-        loss_re_im = 0.5*torch.max(weights*E_re_im, clip_ws*cE_re_im).sum()
-
-        E_im_re = -ops_real[..., None]*theta + me_real*theta + ops_imag[...,None]*logphi
-        cE_im_re = -ops_real[..., None]*theta + cme_real*theta + ops_imag[...,None]*logphi
-        loss_im_re = 0.5*torch.max(weights*E_im_re, clip_ws*cE_im_re).sum()
-
-        E_im_im = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
-        cE_im_im = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
-        loss_im_im = 0.5*torch.max(weights*E_im_im, clip_ws*cE_im_im).sum()
-
-        return torch.stack((loss_re_re, loss_re_im, loss_im_re, loss_im_im), dim=0), me_real
-
-    def regular_backward(data):
-        op_model = copy.deepcopy(psi_model)
-        params, names = extract_weights(op_model)
-
-        def forward(*new_param):
-            load_weights(op_model, names, new_param)
-            loss, _ = compute_loss_energy(op_model, data)
-            return loss
-
-        dydws = jacobian(forward, params, vectorize=True) 
-        cnt = 0
-
-        psi_model.zero_grad()
-        for name, p in psi_model.named_parameters():
-            if name.split(".")[3 + name_index] == 'conv_re':
-                p.grad = dydws[cnt][0] + dydws[cnt + 2][1]
-            elif  name.split(".")[2 + name_index] == 'linear_re':
-                p.grad = dydws[cnt][0]  + dydws[cnt + 1][1]
-            elif name.split(".")[3 + name_index] == 'conv_im':
-                p.grad = dydws[cnt - 2][2] + dydws[cnt][3]
-            elif name.split(".")[2 + name_index] == 'linear_im':
-                p.grad = dydws[cnt][3]  + dydws[cnt - 1][2]
-            else:
-                raise ValueError('Miss update layer: {}'.format(name))
-            cnt += 1
-        return 
+                     
+        E_re = ops_real[..., None]*logphi - me_real*logphi + ops_imag[..., None]*theta
+        cE_re = ops_real[..., None]*logphi - cme_real*logphi + ops_imag[..., None]*theta
+        loss_re = 0.5*torch.max(weights*E_re, clip_ws*cE_re).sum()
+        return loss_re, me_real
 
     # setting optimizer in GPU
     optimizer = torch.optim.Adam(psi_model.parameters(), lr=learning_rate)
@@ -253,23 +211,25 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             # random batch for large systems
             data = buffer.get(batch_size=batch_size, batch_type='rand', get_eops=False)
             optimizer.zero_grad()
+            loss_e, me = compute_loss_energy(data)
             dfs = get_fubini_study_distance(data)
-            _, me = compute_loss_energy(psi_model,data)
             if dfs > target:
                 logger.warning(
                     'early stop at step={} as reaching maximal FS distance'.format(i))
                 break
 
-            regular_backward(data)
+            loss_e.backward()
             optimizer.step()
-
+        
         return dfs, me
 
     # ----------------------------------------------------------------
     tic = time.time()
     logger.info('mean_spin: {}'.format(MHsampler._state0_v))
     logger.info('Start training:')
-    MHsampler.basis_warmup_sample = 10*threads
+    # MHsampler.first_warmup()
+    MHsampler.basis_warmup_sample = 500
+    MHsampler.cal_ops = False
     DFS = 0
     TDFS = target_dfs
 
@@ -288,13 +248,14 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
             MHsampler._warmup = False
         # sync parameters and update the mh_model
         MHsampler._model.load_state_dict(psi_model.state_dict())
-        states, logphis, thetas, update_states, update_coeffs = MHsampler.get_new_samples()
+        states, logphis, thetas, update_states, update_psis, update_coeffs, eff_lens \
+                        = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
         # using unique states to reduce memory usage.
-        states, logphis, thetas, counts, update_states, update_coeffs \
-            = _get_unique_states(states, logphis,thetas, update_states, update_coeffs)
+        states, logphis, thetas, counts, update_states, update_psis, update_coeffs, eff_lens \
+            = _get_unique_states(states, logphis,thetas, update_states, update_psis, update_coeffs, eff_lens)
 
-        buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
+        buffer.update(states, logphis, thetas, counts, update_states, update_psis, update_coeffs, eff_lens)
 
         IntCount = len(states)
         sample_toc = time.time()
@@ -304,7 +265,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         DFS, ME = update(batch_size, target)
         op_toc = time.time()
 
-        sd = 1 if IntCount < batch_size else sample_division
+        sd = 1 if IntCount < batch_size else IntCount//batch_size
         avgE = torch.zeros(sd)
         avgE2 = torch.zeros(sd)
         for i in range(sd):    
@@ -327,7 +288,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         
         # save the trained NN parameters
         if epoch % save_freq == 0 or epoch == epochs - 1:
-            # torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             torch.save(psi_model.state_dict(), os.path.join(save_dir, 'model_'+str(epoch)+'.pkl'))

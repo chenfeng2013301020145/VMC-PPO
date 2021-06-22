@@ -5,8 +5,8 @@ sys.path.append('..')
 
 import numpy as np
 import torch
-from sampler.mcmc_sampler_complex import MCsampler
-from utils import SampleBuffer, _get_unique_states, _generate_updates
+from sampler.mcmc_sampler_complex_ppo import MCsampler
+from utils_ppo import SampleBuffer, _get_unique_states, _generate_updates
 
 gpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cpu = torch.device("cpu")
@@ -38,11 +38,12 @@ class cal_op():
                 get_init_state=self._get_init_state, init_type=self._init_type, n_sample=self._n_sample, 
                 threads=self._threads, updator=self._updator, operator=op)
         self._sampler.single_state0 = self._state0
-        states, logphis, thetas, ustates, ucoeffs = self._sampler.get_new_samples()
-        states, logphis, thetas, counts, uss, ucs \
-            = _get_unique_states(states, logphis, thetas, ustates, ucoeffs)
+        self._sampler.cal_ops = False
+        states, logphis, thetas, ustates, upsis, ucoeffs, efflens = self._sampler.get_new_samples()
+        states, logphis, thetas, counts, uss, upsis, ucs, efflens \
+            = _get_unique_states(states, logphis, thetas, ustates, upsis, ucoeffs, efflens)
         self._states = states
-        self._buff.update(states, logphis, thetas, counts, uss, ucs)
+        self._buff.update(states, logphis, thetas, counts, uss, upsis, ucs, efflens)
         return 
 
     def regen_updates(self, op):
@@ -133,7 +134,7 @@ class Sz():
             L = state.shape[-2]
             W = state.shape[-1]
             return (state.reshape(self._update_size,self._Dp,L,W), 
-                    np.sum(state_v).reshape(self._update_size))
+                    np.sum(state_v).reshape(self._update_size), 1)
 
 class Sx():
     def __init__(self, state_size):
@@ -175,7 +176,7 @@ class Sx():
                     coeffs[cnt] = 1/2
                     cnt += 1
 
-        return states, coeffs
+        return states, coeffs, cnt
 
 class SzSz():
     def __init__(self, state_size, pbc):
@@ -212,7 +213,21 @@ class SzSz():
             else:
                 diag = - np.sum(state_l[:,1:-1]*state_r[:,1:-1]) - np.sum(state_u[1:-1]*state_d[1:-1])
             return (state.reshape(self._update_size,self._Dp,L,W), 
-                    diag.reshape(self._update_size))
+                    diag.reshape(self._update_size), 1)
+            
+    class neel_order():
+        def __init__(self, state_size):
+            """
+            M = \sum_{i}((-1)**i*S_i)
+            """
+            self._dimensions = len(state_size) - 1
+            self._Dp = state_size[-1]
+            if self._dimensions == 1:
+                self._update_size = state_size[0]
+            else:
+                self._update_size = state_size[0]*state_size[1]
+        
+        
 
 
 if __name__ == "__main__":

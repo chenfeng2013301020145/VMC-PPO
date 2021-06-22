@@ -5,14 +5,14 @@
     pyTorch >= 1.8.0 + cu111 
 
 ## Neural-network quantum state (NQS)
-    algos.core: average the outputs of all symmetry states.
-    algos.core-beta: output of the maximum state in a symmetry class (do not support 1D system).
-Two types of convolution neural network are implemented as NQS.
+    algos.core_v1: average the outputs of all symmetry states.
+    algos.core_v2: output of the maximum state in a symmetry class.
+<!-- Two types of convolution neural network are implemented as NQS. -->
 **Inputs**: spin configurations.
 **Outputs**: <img src="http://latex.codecogs.com/gif.latex?\log{|\Psi|~{\rm and}~\theta}">
 
-* pesudocomplex CNN with only real parameters.
-![avatar](pesudo-complex-CNN.png)
+<!-- * pesudocomplex CNN with only real parameters.
+![avatar](pesudo-complex-CNN.png) -->
 * complex CNN contains two sublayers in each layer, one stands for real part and the other denotes the imag part of the complex layer.
 ![avatar](complex-CNN.png)
 
@@ -33,7 +33,6 @@ with the loss function,
 <div align=center><img src="http://latex.codecogs.com/gif.latex?L(w_k,w) = \max\Big(\frac{|\Psi_w|^2}{|\Psi_{w_{k}}|^2}E_{w~{\rm or}~w_{k}}, {\rm clip}\Big( \frac{|\Psi_w|^2}{|\Psi_{w_{k}}|^2}, 1-\epsilon, 1+\epsilon \Big)E_{w~{\rm or}~w_{k}} \Big),"></div>
 
 where <img src="http://latex.codecogs.com/gif.latex?E_w">  is estimated by the current wavefunction <img src="http://latex.codecogs.com/gif.latex?\Psi_w">  and <img src="http://latex.codecogs.com/gif.latex?E_{w_k}">  is estimated by the old wavefunction <img src="http://latex.codecogs.com/gif.latex?\Psi_{w_k}"> .
-
 
 ### Stochastic reconfiguration (TDVP)
     algos.pesudocomplex_sr or algos.complex_sr

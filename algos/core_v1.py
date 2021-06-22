@@ -5,7 +5,7 @@ sys.path.append('..')
 import torch.nn as nn
 import torch
 import numpy as np
-from utils import rot60
+from utils_ppo import rot60
 # from utils import extract_weights,load_weights
 
 def periodic_padding(x, kernel_size, dimensions):
@@ -316,7 +316,6 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1, ac
     dim = len(state_size) - 1
     dimensions = '1d' if dim == 1 else '2d'
     layers = len(F)
-    name_index = 0
     if complex_nn:
         Dp = state_size[-1]
 
@@ -366,7 +365,7 @@ def mlp_cnn(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1, ac
 
         model = nn.Sequential(*cnn_layers)
         model.apply(weight_init)
-    return model, name_index
+    return model
 
 # physical symmetry 
 # -------------------------------------------------------------------------------------------------
@@ -406,11 +405,10 @@ def inverse(x):
     N = 2
     x_inverse = torch.flip(x, dims=[1])
     full_x = torch.stack((x, x_inverse), dim=1).reshape([-1] + list(x.shape[1:]))
-    full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-    return full_x_unique, inverse_indices, N
+    return full_x, N
 
 def identity(x):
-    return x, torch.arange(x.shape[0]), 1
+    return x, 1
 
 def transpose(x):
     dimension = len(x.shape) - 2
@@ -420,8 +418,7 @@ def transpose(x):
         N = 2
         xT = torch.transpose(x, 2, 3)
         full_x = torch.stack((x, xT), dim=1).reshape([-1] + list(x.shape[1:]))
-        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-        return full_x_unique, inverse_indices, N
+        return full_x, N
 
 def c6rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -436,8 +433,7 @@ def c6rotation(x):
         x240 = rot60(x, num=4, dims=[2,3], center=[0])
         x300 = rot60(x, num=5, dims=[2,3], center=[0])
         full_x = torch.stack((x,x60,x120,x180,x240,x300), dim=1).reshape([-1] + list(x.shape[1:]))
-        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-        return full_x_unique, inverse_indices, N
+        return full_x, N
     
 def c4rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -450,8 +446,7 @@ def c4rotation(x):
         x180 = torch.rot90(x, 2, dims=[2,3])
         x270 = torch.rot90(x, 3, dims=[2,3])
         full_x = torch.stack((x, x90, x180, x270), dim=1).reshape([-1] + list(x.shape[1:]))
-        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-        return full_x_unique, inverse_indices, N
+        return full_x, N
     
 def c3rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -463,8 +458,7 @@ def c3rotation(x):
         x120 = rot60(x, num=2, dims=[2,3], center=[1])
         x240 = rot60(x, num=4, dims=[2,3], center=[1])
         full_x = torch.stack((x, x120, x240), dim=1).reshape([-1] + list(x.shape[1:]))
-        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-        return full_x_unique, inverse_indices, N
+        return full_x, N
 
 def c2rotation(x):
     # input shape of x: (batch_size, Dp, N) or (batch_size, Dp, L, W)
@@ -475,8 +469,7 @@ def c2rotation(x):
     else:
         x180 = torch.rot90(x, 2, dims=[2, 3])
         full_x = torch.stack((x, x180), dim=1).reshape([-1] + list(x.shape[1:]))
-        full_x_unique, inverse_indices = torch.unique(full_x, return_inverse=True, dim=0)
-        return full_x_unique, inverse_indices, N
+        return full_x, N
 
 # -------------------------------------------------------------------------------------------------
 # symmetry network
@@ -486,29 +479,25 @@ class sym_model(nn.Module):
                 act=nn.ReLU, complex_nn=False, relu_type='selu', 
                 pbc=True, bias=True, momentum=[0,0], sym_funcs=[identity]):
         super(sym_model,self).__init__()
-        self.model, _ = mlp_cnn(state_size=state_size, K=K, F=F, stride0=stride0, stride=stride, 
+        self.model = mlp_cnn(state_size=state_size, K=K, F=F, stride0=stride0, stride=stride, 
                     output_size=output_size, act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum)
         self.sym_funcs = sym_funcs
     
     def symmetry(self, x):
-        inverse_indices = []
-        Nlist = []
+        sym_N = 1
         for func in self.sym_funcs:
-            x, symfunc_indices, n = func(x)
-            inverse_indices.append(symfunc_indices)
-            Nlist.append(n)
-        return x, inverse_indices, Nlist    
+            x, n = func(x)
+            sym_N *= n 
+        return x, sym_N
     
     # apply symmetry
     def forward(self, x):
-        sym_x_unique, inverse_indices, Nlist = self.symmetry(x)
-        sym_x_unique = self.model(sym_x_unique).reshape(sym_x_unique.shape[0], 1, 2)
-        for i in range(len(inverse_indices)-1, -1, -1):
-            N = Nlist[i]*sym_x_unique.shape[1]
-            sym_x_unique = sym_x_unique[inverse_indices[i],:]
-            sym_x_unique = sym_x_unique.reshape((sym_x_unique.shape[0]*sym_x_unique.shape[1])//N, N, 2)
-        z = sym_x_unique[:,:,0] + 1j*sym_x_unique[:,:,1]
+        sym_x, sym_N = self.symmetry(x)
+        sym_x_unique, inverse_indices = torch.unique(sym_x,return_inverse=True,dim=0)
+        sym_x_unique = self.model(sym_x_unique)
+        sym_x = sym_x_unique[inverse_indices,:].reshape(x.shape[0], sym_N, 2)
+        z = sym_x[:,:,0] + 1j*sym_x[:,:,1]
         z = torch.exp(z).mean(dim=1)
         z = torch.log(z)
         return torch.stack((z.real, z.imag),dim=1)
@@ -518,8 +507,7 @@ def mlp_cnn_sym(state_size, K, F=[4,3,2], stride0=[1], stride=[1], output_size=1
     model = sym_model(state_size=state_size, K=K, F=F, stride0=stride0, stride=stride, output_size=output_size, 
                     act=act, complex_nn=complex_nn, relu_type=relu_type, 
                     pbc=pbc, bias=bias, momentum=momentum, sym_funcs=sym_funcs)
-    name_index = 1
-    return model, name_index
+    return model
 
 # ------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
@@ -527,8 +515,8 @@ if __name__ == '__main__':
     seed = 286
     torch.manual_seed(seed)
     np.random.seed(seed)
-    logphi_model, _ = mlp_cnn_sym([4,4,2], 4, [2,2], stride0=[1], stride=[1], complex_nn=True,
-                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, transpose])
+    logphi_model, _ = mlp_cnn_sym([4,4,2], 4, [2,2,2,2], stride0=[1], stride=[1], complex_nn=True,
+                           output_size=2, relu_type='selu', bias=True, momentum=[0,0], sym_funcs=[c4rotation, transpose, inverse])
     #op_model = mlp_cnn([10,10,2], 2, [2],complex_nn=True, output_size=2, relu_type='sReLU', bias=True)
     # print(logphi_model)
     print(get_paras_number(logphi_model))
@@ -548,11 +536,25 @@ if __name__ == '__main__':
     #print(state0.shape)
     import time
     tic = time.time()
+    #state0 = torch.from_numpy(state0).float()
+    #state0r = torch.transpose(state0, 2, 3)
+    #tt2 = logphi_model(state0r).detach().numpy()
+    #print(np.max(tt - tt2))
+    #state_unique = np.unique(state0, return_inverse=True, return_counts=True, axis=0)
+    #state0 = torch.from_numpy(state0).float()
+    #tt = logphi_model(state0).detach().numpy()[:,0]
+    #state_unique, inverse_indices, counts = torch.unique(state0, return_inverse=True, return_counts=True, dim=0)
+    #print(time.time() - tic)
+    #print(tt[inverse_indices].shape, state_unique.shape)
+    tic = time.time()
     state0 = torch.from_numpy(state0).float()
-    state0r = torch.transpose(state0, 2, 3)
-    tt = logphi_model(state0).detach().numpy()
-    tt2 = logphi_model(state0r).detach().numpy()
-    print(np.max(tt - tt2))
+    #state0r = torch.roll(state0, shifts=1, dims=2)
+    state0r = torch.rot90(state0, 1, dims=[2,3])
+    # state0r = rot60(state0, 2, dims=[2,3], center=[1])
+    #state0r = torch.transpose(state0, 2, 3)
+    tt1 = logphi_model(state0)
+    tt2 = logphi_model(state0r)
+    print(tt1 - tt2)
     print(time.time() - tic)
     
         

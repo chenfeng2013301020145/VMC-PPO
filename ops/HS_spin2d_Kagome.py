@@ -133,12 +133,12 @@ class Heisenberg2DKagome():
                             states[cnt] = temp
                             coeffs[cnt] = 0.5
                             diag -= 0.25
+                            cnt += 1
                         else:
                             diag += 0.25
-                        cnt += 1
-        states[-1] = state.copy()
-        coeffs[-1] = diag
-        return states, coeffs
+        states[cnt] = state.copy()
+        coeffs[cnt] = diag
+        return states, coeffs, cnt+1
     
     
 if __name__ == '__main__':

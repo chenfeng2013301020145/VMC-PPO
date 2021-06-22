@@ -10,9 +10,9 @@ sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
-from sampler.mcmc_sampler_complex import MCsampler
-from algos.core import mlp_cnn, get_paras_number
-from utils import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
+from sampler.mcmc_sampler_complex_sr import MCsampler
+from algos.core_v2 import mlp_cnn, get_paras_number
+from utils_ppo import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
 from torch.autograd.functional import jacobian
 import scipy.io as sio
 import copy
@@ -78,9 +78,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
     updator = train_ops._updator
     buffer = SampleBuffer(gpu, state_size) 
 
-    psi_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args)
-    psi_model.to(gpu)
-    mh_model, _ = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args)
+    psi_model = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args).to(gpu)
+    mh_model = mlp_cnn(state_size=state_size, complex_nn=True, bias=False, **net_args)
     logger.info(psi_model)
     logger.info(get_paras_number(psi_model))
     logger.info('epsilion: {}'.format(epsilon))
@@ -268,14 +267,15 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=100, init_type=
         else:
             MHsampler._warmup = False
             
-        states, logphis, thetas, update_states, update_coeffs = MHsampler.get_new_samples()
+        MHsampler._model.load_state_dict(psi_model.state_dict())
+        states, logphis, thetas, update_states, update_psis, update_coeffs, efflens\
+                        = MHsampler.get_new_samples()
         n_real_sample = MHsampler._n_sample
-
         # using unique states to reduce memory usage.
-        states, logphis, thetas, counts, update_states, update_coeffs \
-            = _get_unique_states(states, logphis, thetas, update_states, update_coeffs)
+        states, logphis, thetas, counts, update_states, update_psis, update_coeffs, efflens \
+            = _get_unique_states(states, logphis, thetas, update_states, update_psis, update_coeffs, efflens)
 
-        buffer.update(states, logphis, thetas, counts, update_states, update_coeffs)
+        buffer.update(states, logphis, thetas, counts, update_states, update_psis, update_coeffs, efflens)
 
         IntCount = len(states)
 
