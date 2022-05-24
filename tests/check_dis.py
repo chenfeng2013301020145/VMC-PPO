@@ -7,12 +7,12 @@ import torch.nn as nn
 from updators.state_swap_updator import updator
 from ops.HS_spin2d import value2onehot
 from algos.core import mlp_cnn, mlp_cnn_sym, get_paras_number, gradient
-from algos.core import translation, reflection, identity, c2rotation, transpose2, inverse
+from algos.core import translation, c6rotation, c4rotation, identity, c2rotation, transpose, inverse
 from ops.operators import cal_op, Sz, Sx, SzSz
 import os
 import argparse
 import scipy.io as sio
-from utils import decimalToAny
+from utils_ppo import decimalToAny
 
 # ----------------------- test ----------------------
 parser = argparse.ArgumentParser()
@@ -26,10 +26,10 @@ args = parser.parse_args()
 
 state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
-net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_funcs=[c2rotation, transpose2, inverse], momentum=[0,0])
-input_fn = 'HS_2d_tri_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo/save_model/model_'+str(args.model_id)+'.pkl'
+net_args = dict(K=args.kernels, F=args.filters, relu_type='cReLU',pbc=True, complex_nn=True, sym_funcs=[c4rotation], momentum=[0,0])
+input_fn = 'HS_2d_sq_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo1/save_model/model_'+str(args.model_id)+'.pkl'
 
-psi_model, _ =  mlp_cnn_sym(state_size=state_size, complex_nn=True, **net_args)
+psi_model = mlp_cnn_sym(state_size=state_size, **net_args)
 load_model = torch.load(os.path.join('../results', input_fn))
 psi_model.load_state_dict(load_model)
 
@@ -55,6 +55,7 @@ def b_check():
     for i, state in enumerate(basis_state):
         state_onehots[i] = torch.from_numpy(value2onehot(state, Dp))
 
+    # print(state_onehots.shape)
     # state_onehots[:,:,-1] = state_onehots[:,:,0]
     # state_onehots = state_onehots[spin_number.argsort(),:,:]
 
@@ -68,7 +69,7 @@ def b_check():
     # plt.bar(np.sort(spin_number), np.exp(logphis*2)/np.sum(np.exp(logphis*2)))
     # plt.show()
 
-    sio.savemat('./data/test_data_HS2dtri_L'+str(args.lattice_length)
+    sio.savemat('./data/test_data_HS2dsq_L'+str(args.lattice_length)
                 +'W'+str(args.lattice_width)+'.mat',dict(probs=probs, logphis=logphis, thetas=thetas))
 
 b_check()

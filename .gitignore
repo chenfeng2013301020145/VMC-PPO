@@ -3,4 +3,4 @@ ED_kagome.py
 ED_tfim.py
 /tests/data/*
 /results*
-/sampler/mcmc_sampler_complex.py
+/.vscode

@@ -7,7 +7,33 @@ from multiprocessing import cpu_count
 import logging
 import os
 from torch import nn, Tensor
-from typing import List, Tuple, Dict, Union, Callable
+from typing import Hashable, List, Tuple, Dict, Union, Callable
+
+# from tests.main_training_hs2d_float import IntCount
+
+def unique(x, dim=None):
+    """Unique elements of x and indices of those unique elements
+    https://github.com/pytorch/pytorch/issues/36748#issuecomment-619514810
+
+    e.g.
+
+    unique(tensor([
+        [1, 2, 3],
+        [1, 2, 4],
+        [1, 2, 3],
+        [1, 2, 5]
+    ]), dim=0)
+    => (tensor([[1, 2, 3],
+                [1, 2, 4],
+                [1, 2, 5]]),
+        tensor([0, 1, 3]))
+    """
+    unique, inverse_indices = torch.unique(x, sorted=True, return_inverse=True, dim=dim)
+    perm = torch.arange(inverse_indices.size(0), dtype=inverse_indices.dtype,
+                        device=inverse_indices.device)
+    inverse, perm = inverse_indices.flip([0]), perm.flip([0])
+    indices = inverse.new_empty(unique.size(0)).scatter_(0, inverse, perm)
+    return unique, indices, inverse_indices
 
 class SampleBuffer:
     def __init__(self, device, state_size):
@@ -18,22 +44,33 @@ class SampleBuffer:
         self._device = device
         if len(state_size) == 2:
             self.single_state_shape = [state_size[0]]
+            self.N = state_size[0]
         else:
             self.single_state_shape = [state_size[0], state_size[1]]
+            self.N = state_size[0]*state_size[1]
         self.Dp = state_size[-1]  # number of physical spins
+        self.pow_list = np.arange(self.N-1, -1, -1)
 
-    def update(self, states, logphis, thetas, counts, 
+    def update(self, states, sym_states, logphis, thetas, counts, 
                update_states, update_psis, update_coeffs, efflens):
+
+        #indices = np.argsort(efflens)
+
         self.states = states
+        self.sym_states = sym_states
         self.logphis = logphis
         self.thetas = thetas
         self.counts = counts
+        #self.update_states = update_states
         self.update_states = update_states
         self.update_psis = update_psis
         self.update_coeffs = update_coeffs
         self.efflens = efflens
+
         self._call_time = 0
-        self.get_energy_ops()
+        # self.get_energy_ops()
+        # if cal_unique:
+        self.get_uniques()
         return
     
     def get_energy_ops(self):
@@ -42,68 +79,101 @@ class SampleBuffer:
         logphi_ops = torch.from_numpy(self.update_psis[:,:,0])
         theta_ops = torch.from_numpy(self.update_psis[:,:,1])
 
-        delta_logphi_os = logphi_ops - logphi[...,None]*torch.ones_like(logphi_ops)
-        delta_theta_os = theta_ops - theta[...,None]*torch.ones_like(theta_ops)
-        op_coeffs = torch.from_numpy(self.update_coeffs)
-        self.ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1).detach()
-        self.ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1).detach()
+        with torch.no_grad():
+            delta_logphi_os = logphi_ops - logphi[...,None]
+            delta_theta_os = theta_ops - theta[...,None]
+            op_coeffs = torch.from_numpy(self.update_coeffs)
+            self.ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)
+            self.ops_imag = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.sin(delta_theta_os), 1)
         return 
+    
+    def get_uniques(self):
+        # calculate unique symmetry states
+        sym_ss_v0 = self.sym_states[:,0,0,:]
+        self.symss_len = len(np.unique(sym_ss_v0, axis=0))
+        
+        sym_ss = self.sym_states.reshape([-1, self.Dp]+self.single_state_shape)
+        _, sym_indices, self.sym_inverse_indices = np.unique(sym_ss[:,0,:], return_index=True, 
+                                                    return_inverse=True, axis=0)
+        self.unique_symss = sym_ss[sym_indices]
 
-    def get(self, batch_size=100, batch_type='rand', sample_division=1, get_eops=False):
-        n_sample = len(self.states)
-        devision_len = n_sample // sample_division 
+        # shape of uss: (batch_size, update_size, sym_N, Dp, L, W)
+        # calculate unique update states
+        uss = self.update_states.reshape([-1, self.Dp]+self.single_state_shape)
+        _, indices, self.uss_inverse_indices = np.unique(uss[:,0,:], return_index=True, 
+                                                        return_inverse=True, axis=0)
+        self.unique_uss = uss[indices]
+        self.uss_len = len(self.unique_uss)
+        self.full_labels = np.arange(self.update_coeffs.shape[0]*self.update_coeffs.shape[1])\
+                            .reshape(self.update_coeffs.shape[0], self.update_coeffs.shape[1])
         
-        if n_sample <= batch_size:
-            batch_label = range(len(self.states))
-        elif batch_type == 'rand':
-            batch_label = np.random.choice(n_sample, batch_size, replace=False)
-        elif batch_type == 'equal':
-            if self._call_time < sample_division - 1:
-                batch_label = range(self._call_time*devision_len, (self._call_time+1)*devision_len)
-                self._call_time += 1
-            else:
-                batch_label = range(self._call_time*devision_len, n_sample)
-                self._call_time = 0
+        return 
         
+    def get_all(self, get_eops=False):         
         if not get_eops:
-            states = self.states[batch_label]
-            logphis = self.logphis[batch_label]
-            thetas = self.thetas[batch_label]
-            counts = self.counts[batch_label]
-            efflen = np.max(self.efflens[batch_label])
+            gpu_update_states_unique = torch.from_numpy(self.unique_uss).float().to(self._device)
+            gpu_uss_inverse_indices = torch.from_numpy(self.uss_inverse_indices).to(self._device)
+            gpu_update_coeffs = torch.from_numpy(self.update_coeffs).float().to(self._device)
             
-            update_states = self.update_states[batch_label, :efflen, :]
-            update_coeffs = self.update_coeffs[batch_label, :efflen]
-
-            gpu_states = torch.from_numpy(states).float().to(self._device)
-            gpu_counts = torch.from_numpy(counts).float().to(self._device)
-            gpu_update_coeffs = torch.from_numpy(update_coeffs).float().to(self._device)
-            gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
-            gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
-            
-            # save GPU memory with unique array
-            update_states = torch.from_numpy(update_states).float().to(self._device).reshape([-1, self.Dp]+self.single_state_shape)
-            gpu_update_states_unique, gpu_inverse_indices = torch.unique(update_states,return_inverse=True,dim=0)
-            
-            return dict(state=gpu_states, count=gpu_counts, update_coeffs=gpu_update_coeffs, 
-                        logphi0=gpu_logphi0, theta0=gpu_theta0, update_states_unique=gpu_update_states_unique, 
-                        inverse_indices=gpu_inverse_indices)
+            return dict(update_coeffs=gpu_update_coeffs, 
+                        update_states_unique=gpu_update_states_unique, 
+                        uss_inverse_indices=gpu_uss_inverse_indices)
         else:    
-            states = self.states[batch_label]
-            logphis = self.logphis[batch_label]
-            thetas = self.thetas[batch_label]
-            counts = self.counts[batch_label]
+            gpu_ops_real = self.ops_real.float().to(self._device)
+            gpu_ops_imag = self.ops_imag.float().to(self._device)
+            return dict(ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)
 
-            gpu_states = torch.from_numpy(states).float().to(self._device)
-            gpu_counts = torch.from_numpy(counts).float().to(self._device)
-            gpu_logphi0 = torch.from_numpy(logphis).float().to(self._device)
-            gpu_theta0 = torch.from_numpy(thetas).float().to(self._device)
+    def cut_samples(self, preload_size=100, batch_size=100, batch_type='equal'):
+        # n_sample = len(self.states) - preload_size
+        n_sample = self.uss_len - preload_size
+        devision_len = batch_size
+        sd = 1 if n_sample < batch_size else int(np.ceil(n_sample/batch_size))
+
+        if n_sample + preload_size <= batch_size:
+            self.batch_label = np.arange(n_sample)[None,...]
+        elif batch_type == 'rand':
+            self.batch_label = np.random.choice(n_sample, batch_size, replace=False)[None,...]
+        elif batch_type == 'equal':
+            self.batch_label = []
+            for i in range(sd):
+                if i < sd - 1:
+                    self.batch_label.append(np.arange(i*devision_len+preload_size, (i+1)*devision_len+preload_size))
+                else:
+                    self.batch_label.append(np.arange(i*devision_len+preload_size, n_sample+preload_size))
+        return
+
+    def get_states(self, preload_size=100):
+        # gpu_states = torch.from_numpy(self.states).float().to(self._device)
+        gpu_sym_states = torch.from_numpy(self.unique_symss).float().to(self._device)
+        gpu_sym_ii = torch.from_numpy(self.sym_inverse_indices).to(self._device)
+
+        gpu_counts = torch.from_numpy(self.counts).float().to(self._device)
+        gpu_logphi0 = torch.from_numpy(self.logphis).float().to(self._device)
+        gpu_theta0 = torch.from_numpy(self.thetas).float().to(self._device)
+
+        gpu_update_coeffs = torch.from_numpy(self.update_coeffs).float().to(self._device)
+        gpu_uss_inverse_indices = torch.from_numpy(self.uss_inverse_indices).to(self._device)
+        
+        batch_label = np.arange(preload_size)
+        selected_uss = self.unique_uss[batch_label,:]
+        pre_gpu_update_states_unique = torch.from_numpy(selected_uss).float().to(self._device)
+
+        return gpu_sym_states, gpu_sym_ii, gpu_counts, gpu_logphi0, gpu_theta0, \
+               gpu_update_coeffs, gpu_uss_inverse_indices, pre_gpu_update_states_unique
+
+    def get(self, idx=1, get_eops=False):
+        batch_label = self.batch_label[idx]
+           
+        if not get_eops:
+            selected_uss = self.unique_uss[batch_label,:]
+            gpu_update_states_unique = torch.from_numpy(selected_uss).float().to(self._device)
+            
+            return dict(update_states_unique=gpu_update_states_unique)
+        else:    
             gpu_ops_real = self.ops_real[batch_label].float().to(self._device)
             gpu_ops_imag = self.ops_imag[batch_label].float().to(self._device)
-
-            return dict(state=gpu_states, count=gpu_counts, logphi0=gpu_logphi0, 
-                        theta0=gpu_theta0, ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)
-                    
+            return dict(ops_real=gpu_ops_real, ops_imag=gpu_ops_imag)
+                
 def _get_unique_states(states, logphis, thetas, ustates, upsis, ucoeffs, efflens):
     """
     Returns the unique states, their coefficients and the counts.
@@ -117,7 +187,31 @@ def _get_unique_states(states, logphis, thetas, ustates, upsis, ucoeffs, efflens
     efflens = efflens[indices]
     return states, logphis, thetas, counts, ustates, upsis, ucoeffs, efflens
 
-def _generate_updates(states, operator, single_state_shape, update_size, threads):
+def find_states_and_ops(model, operator, states, single_state_shape ,cal_ops=False):
+    with torch.no_grad():
+        n_sample = states.shape[0]
+        update_states = np.zeros([n_sample, operator._update_size] + single_state_shape)
+        update_psis = np.zeros([n_sample, operator._update_size, 2])
+        update_coeffs = np.zeros([n_sample, operator._update_size])
+        efflens = np.zeros([n_sample], dtype=np.int64)
+        
+        if cal_ops:
+            for i,state in enumerate(states):
+                update_states[i], update_coeffs[i], efflen = operator.find_states(state)
+                efflens[i] = efflen
+                ustates = update_states[i,:efflen,:].reshape([-1]+single_state_shape)
+                upsis = model(torch.from_numpy(ustates).float())
+                update_psis[i,:efflen,:] = upsis.numpy().reshape([1, efflen, 2])
+        else:
+            for i,state in enumerate(states):
+                update_states[i], update_coeffs[i], efflen = operator.find_states(state)
+                efflens[i] = efflen
+                ustates = update_states[i,:efflen,:].reshape([-1]+single_state_shape)
+                ustates = model.pick_sym_config(torch.from_numpy(ustates)).numpy()
+                update_states[i,:efflen,:] = ustates.reshape(update_states[i,:efflen,:].shape)
+    return update_states, update_psis, update_coeffs, efflens
+
+def _generate_updates(states, model, operator, single_state_shape, update_size, threads):
     """
     Generates updated states and coefficients for an Operator.
 
@@ -138,23 +232,25 @@ def _generate_updates(states, operator, single_state_shape, update_size, threads
     n_sample = states.shape[0]
     ustates = np.zeros([n_sample, update_size] + single_state_shape)
     ucoeffs = np.zeros([n_sample, update_size])
+    efflens = np.zeros([n_sample], dtype=np.int64)
 
     pool = multiprocessing.Pool(threads)
     results = []
     cnt = 0
     
     for state in states:
-        results.append(pool.apply_async(operator.find_states, (state,)))
+        results.append(pool.apply_async(find_states_and_ops, 
+                                       (model, operator, state, single_state_shape, )))
     pool.close()
     pool.join()
 
     for cnt, res in enumerate(results):
-        ustates[cnt], ucoeffs[cnt] = res.get()
+        ustates[cnt], ucoeffs[cnt], efflens[cnt] = res.get()
 
-    return ustates, ucoeffs
+    return ustates, ucoeffs, efflens
 
 # logger definitions
-def get_logger(filename, verbosity=1, name=None):
+def get_logger(filename, verbosity=0, name=None):
 
     path = filename[0:filename.rfind("/")]
     if not os.path.isdir(path):
@@ -165,12 +261,15 @@ def get_logger(filename, verbosity=1, name=None):
 
     level_dict = {0: logging.DEBUG, 1: logging.INFO, 2: logging.WARNING}
     formatter = logging.Formatter(
-        "[%(asctime)s][%(filename)s][%(levelname)s] %(message)s"
-    )
+        "[%(asctime)s][%(filename)s][%(levelname)s] %(message)s")
     logger = logging.getLogger(name)
     logger.setLevel(level_dict[verbosity])
 
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
     fh = logging.FileHandler(filename, "w")
+    fh.setLevel(level_dict[verbosity+1])
     fh.setFormatter(formatter) 
     logger.addHandler(fh)
 

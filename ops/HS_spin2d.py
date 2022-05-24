@@ -65,6 +65,7 @@ class Heisenberg2DSquare():
         coeffs = np.zeros(self._update_size)
         diag = 0.0
         cnt = 0
+        oy, ox, sy, sx = [],[],[],[]
         for r in range(L):
             for c in range(W):
                 for dr, dc in self._nearest_neighbors:
@@ -76,17 +77,19 @@ class Heisenberg2DSquare():
                         else:
                             continue
                     if np.sum(state[:, r, c] * state[:, rr, cc]) != 1:
-                        temp = state.copy()
-
-                        # This is the correct way of swapping states when
-                        # temp.ndim > 2.
-                        temp[:, [r, rr], [c, cc]] = temp[:, [rr, r], [cc, c]]
-                        states[cnt] = temp
+                        oy.append(r)
+                        ox.append(c)
+                        sy.append(rr)
+                        sx.append(cc)
                         coeffs[cnt] = 0.5
                         diag -= 0.25
                         cnt +=1
                     else:
                         diag += 0.25
+                        
+        temp = np.repeat(state.reshape(1,Dp,L,W), cnt, axis=0)
+        temp[range(cnt), :, [oy, sy], [ox, sx]] = temp[range(cnt), :, [sy, oy], [sx, ox]]
+        states[:cnt] = temp
         states[cnt] = state.copy()
         coeffs[cnt] = diag
         return states, coeffs, cnt+1
@@ -189,26 +192,29 @@ class J1J2_2DSquare():
                         cnt += 1
                     else:
                         diag += 0.25
+                        
                 # j2
-                for dr, dc in self._nearest_neighbors_j2:
-                    rr, cc = r + dr, c + dc
-                    if rr >= L or cc >= W:
-                        if self._pbc:
-                            rr %= L
-                            cc %= W
+                if self._j2 != 0:
+                    for dr, dc in self._nearest_neighbors_j2:
+                        rr, cc = r + dr, c + dc
+                        if rr >= L or cc >= W:
+                            if self._pbc:
+                                rr %= L
+                                cc %= W
+                            else:
+                                continue
+                        if np.sum(state[:, r, c] * state[:, rr, cc]) != 1:
+                            temp = state.copy()
+                            # This is the correct way of swapping states when
+                            # temp.ndim > 2.
+                            temp[:, [r, rr], [c, cc]] = temp[:, [rr, r], [cc, c]]
+                            states[cnt] = temp
+                            coeffs[cnt] = 0.5*self._j2
+                            diag -= 0.25*self._j2
+                            cnt += 1
                         else:
-                            continue
-                    if np.sum(state[:, r, c] * state[:, rr, cc]) != 1:
-                        temp = state.copy()
-                        # This is the correct way of swapping states when
-                        # temp.ndim > 2.
-                        temp[:, [r, rr], [c, cc]] = temp[:, [rr, r], [cc, c]]
-                        states[cnt] = temp
-                        coeffs[cnt] = 0.5*self._j2
-                        diag -= 0.25*self._j2
-                        cnt += 1
-                    else:
-                        diag += 0.25*self._j2
+                            diag += 0.25*self._j2
+
         states[cnt] = state.copy()
         coeffs[cnt] = diag
         return states, coeffs, cnt+1

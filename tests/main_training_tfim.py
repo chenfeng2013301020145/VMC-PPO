@@ -7,14 +7,17 @@ import torch
 import torch.nn as nn 
 from updators.state_flip_updator import updator
 from ops.tfim_spin1d import TFIMSpin1D, get_init_state
-from algos.pesudocomplex_ppo import train 
-from ops.operators import cal_op, Sz, Sx, SzSz
+from algos.complex_ppo import train 
+from algos.core import translation, identity, c6rotation, c4rotation, transpose, inverse
+# from ops.operators import cal_op, Sz, Sx, SzSz
 import os
 import argparse
 import scipy.io as sio
-from utils import decimalToAny
+from utils_ppo import decimalToAny
+import warnings
 
-'''
+warnings.filterwarnings('ignore')
+
 # ----------------------- test ----------------------
 parser = argparse.ArgumentParser()
 parser.add_argument('--epochs', type=int, default=10)
@@ -24,41 +27,50 @@ parser.add_argument('--lr',type=float, default=1E-3)
 parser.add_argument('--lattice_size',type=int, default=10)
 parser.add_argument('--Dp', type=int, default=2)
 parser.add_argument('--threads', type=int, default=4)
-parser.add_argument('--kernels', type=int, default=3)
-parser.add_argument('--filters', type=int, default=4)
-parser.add_argument('--layers', type=int, default=2)
+parser.add_argument('--kernels', nargs='+', type=int, default=[3])
+parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
 parser.add_argument('--g', type=float, default=1.)
+parser.add_argument('--dfs', type=float, default=0.01)
+parser.add_argument('--warmup_length', type=int, default=500)
+parser.add_argument('--seed', type=int, default=1234)
+parser.add_argument('--warm_up_sample_length', type=int, default=20)
 args = parser.parse_args()
 
 state_size = [args.lattice_size, args.Dp]
 Ops_args = dict(hamiltonian=TFIMSpin1D, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(g=args.g, state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, layers=args.layers)
+net_args = dict(K=args.kernels, F=args.filters, relu_type='snake', pbc=True,
+         sym_funcs=[identity], momentum=[0], apply_unique=False, MPphase=False, MPtype='NN', alpha=0.5)
 input_fn = 0
-output_fn ='TFIM_1d_L16'
+output_fn ='TFIM_1d_L%d_vmcppo'%(args.lattice_size)
 
+# trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
+#          Ham_args=Ham_args, n_sample=args.n_sample, 
+#         n_optimize=args.n_optimize, learning_rate=args.lr, state_size=state_size, 
+#         save_freq=10, dimensions='1d', net_args=net_args, input_fn=input_fn, load_state0=False,
+#         threads=args.threads, output_fn=output_fn, sample_division=5)
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-         Ham_args=Ham_args, n_sample=args.n_sample, 
-        n_optimize=args.n_optimize, learning_rate=args.lr, state_size=state_size, 
-        save_freq=10, dimensions='1d', net_args=net_args, input_fn=input_fn, load_state0=False,
-        threads=args.threads, output_fn=output_fn, sample_division=5)
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed=args.seed, preload_size=5000, batch_size=10000,
+        learning_rate=args.lr, state_size=state_size, save_freq=10,
+        net_args=net_args, threads=args.threads, input_fn=input_fn, load_state0=False, warmup_length=args.warmup_length,
+        output_fn=output_fn, target_dfs=args.dfs, warm_up_sample_length=args.warm_up_sample_length)
 
-calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model, state0=state0, n_sample=args.n_sample, 
-            updator=updator, get_init_state=get_init_state, threads=args.threads, sample_division=20)
+# calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model, state0=state0, n_sample=args.n_sample, 
+#             updator=updator, get_init_state=get_init_state, threads=args.threads, sample_division=20)
 
 
-sz, stdsz, IntCount = calculate_op.get_value(operator=Sz, op_args=dict(state_size=state_size))
-print([sz/args.lattice_size, stdsz, IntCount])
+# sz, stdsz, IntCount = calculate_op.get_value(operator=Sz, op_args=dict(state_size=state_size))
+# print([sz/args.lattice_size, stdsz, IntCount])
 
-szsz, stdszsz, IntCount = calculate_op.get_value(operator=SzSz, op_args=dict(state_size=state_size,pbc=True))
-print([szsz/args.lattice_size, stdsz, IntCount])
+# szsz, stdszsz, IntCount = calculate_op.get_value(operator=SzSz, op_args=dict(state_size=state_size,pbc=True))
+# print([szsz/args.lattice_size, stdsz, IntCount])
 
-sx, stdsx, IntCount = calculate_op.get_value(operator=Sx, op_args=dict(state_size=state_size))
-print([sx/args.lattice_size, stdsx, IntCount])
+# sx, stdsx, IntCount = calculate_op.get_value(operator=Sx, op_args=dict(state_size=state_size))
+# print([sx/args.lattice_size, stdsx, IntCount])
 
-meane, stde, IntCount = calculate_op.get_value(operator=TFIMSpin1D, op_args=Ham_args)
-print([meane/args.lattice_size, stde, IntCount])
-'''
+# meane, stde, IntCount = calculate_op.get_value(operator=TFIMSpin1D, op_args=Ham_args)
+# print([meane/args.lattice_size, stde, IntCount])
+
 '''
 def b_check():
     Dp = args.Dp
@@ -92,29 +104,29 @@ def b_check():
 # b_check()
 # phase diagram for g \in [-2,2]
 
-sz_list = []
-sx_list = []
-energy = []
-state_size = [16,2]
-Ops_args = dict(hamiltonian=TFIMSpin1D, get_init_state=get_init_state, updator=updator)
-net_args = dict(K=2, F=4, layers=2)
-output_fn ='TFIM_1d'
-for g in np.linspace(-1,1,30):
-    Ham_args = dict(state_size=state_size,g=g, pbc=True)
-    trained_psi_model, state0, mean_e = train(epochs=50, Ops_args=Ops_args, Ham_args=Ham_args, 
-            n_sample=45000, n_optimize=100, learning_rate=3E-4, state_size=state_size, dimensions='1d',
-            save_freq=10, net_args=net_args, threads=45, output_fn=output_fn, sample_division=5)
+# sz_list = []
+# sx_list = []
+# energy = []
+# state_size = [16,2]
+# Ops_args = dict(hamiltonian=TFIMSpin1D, get_init_state=get_init_state, updator=updator)
+# net_args = dict(K=2, F=4, layers=2)
+# output_fn ='TFIM_1d'
+# for g in np.linspace(-1,1,30):
+#     Ham_args = dict(state_size=state_size,g=g, pbc=True)
+#     trained_psi_model, state0, mean_e = train(epochs=50, Ops_args=Ops_args, Ham_args=Ham_args, 
+#             n_sample=45000, n_optimize=100, learning_rate=3E-4, state_size=state_size, dimensions='1d',
+#             save_freq=10, net_args=net_args, threads=45, output_fn=output_fn, sample_division=5)
     
-    calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model, state0=state0, n_sample=45000, 
-            updator=updator, get_init_state=get_init_state, threads=45, sample_division=10)
+#     calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model, state0=state0, n_sample=45000, 
+#             updator=updator, get_init_state=get_init_state, threads=45, sample_division=10)
     
-    sz, _, _ = calculate_op.get_value(operator=Sz, op_args=dict(state_size=state_size))
+#     sz, _, _ = calculate_op.get_value(operator=Sz, op_args=dict(state_size=state_size))
 
-    sx, _, _ = calculate_op.get_value(operator=Sx, op_args=dict(state_size=state_size))
+#     sx, _, _ = calculate_op.get_value(operator=Sx, op_args=dict(state_size=state_size))
 
-    print([sz, sx])
-    sz_list.append(sz)
-    sx_list.append(sx)
-    energy.append(mean_e)
+#     print([sz, sx])
+#     sz_list.append(sz)
+#     sx_list.append(sx)
+#     energy.append(mean_e)
 
-sio.savemat('tfim1d_pd_data.mat',{'sz':np.array(sz_list), 'sx':np.array(sx_list), 'energy':np.array(energy)})
+# sio.savemat('tfim1d_pd_data.mat',{'sz':np.array(sz_list), 'sx':np.array(sx_list), 'energy':np.array(energy)})

@@ -8,8 +8,8 @@ import torch.nn as nn
 from updators.state_kagome_swap_updator import updator
 from ops.HS_spin2d_Kagome import Heisenberg2DKagome, get_init_state, value2onehot
 from ops.HS_spin2d_Kagome import state2_to_state3, state3_to_state2
-from algos.complex_ppo import train
-from algos.core import reflection, identity, c4rotation
+from algos.complex_ppo2 import train
+from algos.core import identity, c6rotation, c4rotation, c3rotation, transpose, inverse
 from ops.operators import cal_op, Sz, Sx, SzSz
 import os
 import argparse
@@ -36,16 +36,16 @@ state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = (state_size[0]//2)*(state_size[1]//2)*3
 Ops_args = dict(hamiltonian=Heisenberg2DKagome, get_init_state=get_init_state, updator=updator)
 Ham_args = dict(state_size=state_size, pbc=True)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', sym_funcs=[identity], stride0=[2], momentum=[0,0])
+net_args = dict(K=args.kernels, F=args.filters, relu_type='selu',pbc=False, sym_funcs=[c3rotation, transpose, inverse], momentum=[0,0])
 # input_fn = 'HS_2d_tri_L4W2/save_model/model_99.pkl'
 input_fn = 0
 output_fn ='HS_2d_Ka_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed = 2867,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed=7886, batch_size=2000,
         learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d',
-        net_args=net_args, threads=args.threads, input_fn=input_fn, 
-        output_fn=output_fn, target_dfs=args.dfs, sample_division=5, 
+        net_args=net_args, threads=args.threads, input_fn=input_fn,
+        output_fn=output_fn, target_dfs=args.dfs, sample_division=5,
         TolSite=TolSite)
 # print(state0.shape)
 calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model,
@@ -71,7 +71,7 @@ def b_check():
     L = args.lattice_length
     W = args.lattice_width
     L3 = L // 2
-    W3 = W // 2 
+    W3 = W // 2
     num = L3*W3*3
     ms = 0 if num%2 == 0 else -0.5
     # chech the final distribution on all site configurations.

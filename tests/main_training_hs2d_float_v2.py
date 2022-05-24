@@ -5,12 +5,11 @@ sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
 from updators.state_swap_updator import updator
-from ops.HS_spin2d import J1J2_2DSquare, Heisenberg2DTriangle, get_init_state, value2onehot
-from algos.complex_ppo import train
-from algos.core import translation, identity, c6rotation, c4rotation, transpose, inverse
-# from ops.operators import cal_op, Sz, Sx, SzSz
+from ops.HS_spin2d import Heisenberg2DSquare, J1J2_2DSquare, get_init_state, value2onehot
+from algos.complex_ppo_corev2 import train
+from algos.core_v2 import translation, identity, c6rotation, c4rotation, transpose, inverse
+from ops.operators_v1 import cal_op, Sz, Sx, SzSz
 import os
 import argparse
 import scipy.io as sio
@@ -34,25 +33,24 @@ parser.add_argument('--filters', nargs='+', type=int, default=[4, 3, 2])
 parser.add_argument('--dfs', type=float, default=0.01)
 parser.add_argument('--warmup_length', type=int, default=500)
 parser.add_argument('--seed', type=int, default=1234)
-parser.add_argument('--warm_up_sample_length', type=int, default=20)
 args = parser.parse_args()
 
 state_size = [args.lattice_length, args.lattice_width, args.Dp]
 TolSite = args.lattice_length*args.lattice_width
 Ops_args = dict(hamiltonian=J1J2_2DSquare, get_init_state=get_init_state, updator=updator)
-Ham_args = dict(state_size=state_size, pbc=True, j2=0.5)
-net_args = dict(K=args.kernels, F=args.filters, relu_type='snake', pbc=True,
-         sym_funcs=[c4rotation,transpose], momentum=[0,0], 
-         apply_unique=False, MPphase=False, MPtype='NN', alpha=0.75)
+Ham_args = dict(state_size=state_size, pbc=True, j2=0)
+net_args = dict(K=args.kernels, F=args.filters, relu_type='selu', pbc=False,
+         sym_funcs=[c4rotation, transpose, translation], momentum=[0,0], MPphase=True, MPtype='NN')
 # input_fn = 'HS_2d_sq_L4W4_vmcppo1/save_model/model_999.pkl'
 input_fn = 0
-output_fn ='HS_2d_j1j2_05_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo1'
+output_fn ='HS_2d_j1j2_0n_L'+str(args.lattice_length)+'W'+str(args.lattice_width)+'_vmcppo2'
 
 trained_psi_model, state0, _ = train(epochs=args.epochs, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, seed=args.seed, preload_size=5000, batch_size=10000,
-        learning_rate=args.lr, state_size=state_size, save_freq=10,
+        Ham_args=Ham_args, n_sample=args.n_sample, n_optimize=args.n_optimize, 
+        seed=args.seed, preload_size=10000, batch_size=1500,
+        learning_rate=args.lr, state_size=state_size, save_freq=10, dimensions='2d',
         net_args=net_args, threads=args.threads, input_fn=input_fn, load_state0=False, warmup_length=args.warmup_length,
-        output_fn=output_fn, target_dfs=args.dfs, warm_up_sample_length=args.warm_up_sample_length)
+        output_fn=output_fn, target_dfs=args.dfs)
 # print(state0.shatarget_dfs
 # calculate_op = cal_op(state_size=state_size, psi_model=trained_psi_model,
 #             state0=state0, n_sample=5*args.n_sample, updator=updator,

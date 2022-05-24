@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sampler.mcmc_sampler_complex_sr import MCsampler
-from algos.core_v2 import mlp_cnn, get_paras_number
+from algos.core import mlp_cnn, get_paras_number
 from utils_ppo import SampleBuffer, get_logger, _get_unique_states, extract_weights, load_weights
 from torch.autograd.functional import jacobian
 import scipy.io as sio
