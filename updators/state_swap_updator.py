@@ -20,6 +20,23 @@ class updator():
         # print(np.random.randint(0,10))
         return masks
 
+    def generate_state_mask(self, state):
+        full_index = np.arange(1, self._N+1)
+        state = state.reshape(self._Dp, self._N)
+
+        state_index_list = []
+        for d in range(self._Dp):
+            state_index_list.append(np.unique(state[d]*full_index)[1:])
+
+        swap_dp = np.random.choice(self._Dp, size=2, replace=False)
+
+        first_index = int(np.random.choice(state_index_list[swap_dp[0]], size=1) - 1)
+        second_index = int(np.random.choice(state_index_list[swap_dp[1]], size=1) - 1)
+
+        mask = np.arange(self._N)
+        mask[first_index], mask[second_index] = mask[second_index], mask[first_index]
+        return mask
+
     def _get_update(self, state, mask):
         temp = state.reshape(self._Dp, self._N).T
         state_f = temp[mask]

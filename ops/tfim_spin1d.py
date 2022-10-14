@@ -26,6 +26,12 @@ def get_init_state(state_size,kind='rand',n_size=1):
 def onehot2value(state, Dp): 
     state_v = np.arange(0,Dp).reshape(Dp,1)*np.squeeze(state)
     return np.sum(state_v,0).astype(dtype=np.int8)
+
+def value2onehot(state, Dp): 
+    N = state.shape[0]
+    state_onehot = np.zeros([Dp, N])
+    state_onehot[state.astype(dtype=np.int8),range(N)] = 1
+    return state_onehot
     
 class TFIMSpin1D():
 
@@ -33,7 +39,7 @@ class TFIMSpin1D():
         """
         Tranverse Ising model in 1 dimension:
         Hamiltonian: 
-            H = - sum_i{sigma^z_i * sigma^z_{i + 1}} + g*sum_i{sigma^x_i}
+            H = sum_i{sigma^z_i * sigma^z_{i + 1}} + g*sum_i{sigma^x_i}
 
         Args:
             g: Strength of the transverse field.
@@ -49,25 +55,49 @@ class TFIMSpin1D():
         states = np.zeros([N+1, Dp, N])
         coeffs = np.zeros(N+1)
 
-        # off-diagnal
-        for i in range(N):
+        # # off-diagnal
+        # for i in range(N):
+        #     temp = state.copy()
+        #     temp[0,i], temp[1,i] = state[1,i], state[0,i]
+        #     states[i,:,:] = temp
+        #     coeffs[i] = 1/2*self._g
+
+        # # diagnal 
+        # state_v = onehot2value(state, Dp) - 1/2
+        # state_l = np.concatenate((state_v, state_v[0].reshape(1,)), axis=0)
+        # state_r = np.concatenate((state_v[-1].reshape(1,), state_v), axis=0)
+        # if self._pbc:   
+        #     diag = - np.sum(state_l[1:]*state_r[1:])
+        # else:
+        #     diag = - np.sum(state_l[1:-1]*state_r[1:-1])
+        # states[-1,:,:] = state
+        # coeffs[-1] = diag
+
+        cnt = 0
+        diag = 0
+        for r in range(N):
             temp = state.copy()
-            temp[0,i], temp[1,i] = state[1,i], state[0,i]
-            states[i,:,:] = temp
-            coeffs[i] = 1/2*self._g
+            temp[0, r], temp[1, r] = state[1, r], state[0, r]
+            states[cnt] = temp 
+            coeffs[cnt] = 1/2*self._g
+            cnt += 1
 
-        # diagnal 
-        state_v = onehot2value(state, Dp) - 1/2
-        state_l = np.concatenate((state_v, state_v[0].reshape(1,)), axis=0)
-        state_r = np.concatenate((state_v[-1].reshape(1,), state_v), axis=0)
-        if self._pbc:   
-            diag = - np.sum(state_l[1:]*state_r[1:])
-        else:
-            diag = - np.sum(state_l[1:-1]*state_r[1:-1])
-        states[-1,:,:] = state
-        coeffs[-1] = diag
+            rr = r + 1
+            if rr >=N:
+                if self._pbc:
+                    rr %= N
+                else:
+                    continue
+            
+            if np.sum(state[:,r]*state[:, rr]) != 1:
+                diag -= 0.25
+            else:
+                diag += 0.25
 
-        return states, coeffs
+        states[cnt] = state
+        coeffs[cnt] = diag
+
+        return states, coeffs, cnt+1
 
 if __name__=='__main__':
     from tfim_spin1d import get_init_state
