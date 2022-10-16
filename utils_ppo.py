@@ -143,6 +143,9 @@ class SampleBuffer(Dataset):
         for i in range(self._sd):
             if i < self._sd - 1:
                 self.batch_label.append(np.arange(i*devision_len+preload_size, (i+1)*devision_len+preload_size))
+            elif i*devision_len+preload_size == n_sample+preload_size:
+                self._sd -= 1
+                break
             else:
                 self.batch_label.append(np.arange(i*devision_len+preload_size, n_sample+preload_size))
         return
