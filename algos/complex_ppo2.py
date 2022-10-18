@@ -432,8 +432,8 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), net_args=dict(), n_sampl
             if i == 0:
                 er = me
                 
-            if dfs > 1.5*target:
-            #if np.log(mincut) < -1.5*target or np.log(maxcut) > target:
+            #if dfs > 1.5*target:
+            if np.log(mincut) < -1.5*target or np.log(maxcut) > target:
                 logger.debug(
                 'early stop at step={} as reaching maximal FS distance in updating logphis'.format(i))
                 # early_stop = True
