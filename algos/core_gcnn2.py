@@ -327,7 +327,7 @@ class OutPut_real_layer(nn.Module):
         if self.dimensions=='1d':
             return torch.sum(x, dim=[1,2])/norm
         else:
-            #return self.linear(torch.sum(x, dim=[2,3,4])/norm).squeeze(-1)
+            # return self.linear(torch.sum(x, dim=[2,3,4])/norm).squeeze(-1)
             # if self.output_mode == 'phi':
             #     return torch.sum(x, dim=[1,2,3,4])/norm
             # else:
@@ -812,7 +812,7 @@ class sym_model(nn.Module):
                 nn.init.kaiming_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Conv2d):
+            elif isinstance(m, nn.Conv1d):
                 nn.init.xavier_uniform_(m.weight, gain=1/np.sqrt(2))
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
