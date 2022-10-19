@@ -148,10 +148,10 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), net_args=dict(), n_sampl
             # theta_ops = psi_ops[:, 1]
 
         if batch_type=='batch':
-            padding = torch.empty(batch_size-len(op_states_unique), device=gpu, dtype=precision)
+            padding = torch.empty(batch_size-len(op_states_unique), device=gpu)
             return torch.cat((logphi_ops.reshape(-1), padding), dim=0)
         else:
-            return logphi_ops
+            return logphi_ops[...,None]
 
     def compute_ops_ppo(batch_size):
         data = buffer.get(batch_size=batch_size,get_eops=True)
@@ -293,13 +293,15 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), net_args=dict(), n_sampl
                     batch_op_states = data['update_states_unique']    
                     logphi_ops[i] = compute_psi_ops_single(batch_op_states, batch_size, batch_type='batch', mode=mode)
                 
-                logphi_ops = logphi_ops.reshape(sd*batch_size)[:IntCount_uss]
+                logphi_ops = logphi_ops.reshape(sd*batch_size, -1)[:IntCount_uss]
+                #theta_ops = theta_ops.reshape(sd*batch_size, -1)[:IntCount_uss]
 
-                logphi_ops = torch.cat((pre_logphi_ops, logphi_ops), dim=0)[op_ii].reshape(n_sample, n_updates)
+                logphi_ops = torch.cat((pre_logphi_ops, logphi_ops), dim=0)[op_ii,:].reshape(n_sample, n_updates)
+                #theta_ops = torch.cat((pre_theta_ops, theta_ops), dim=0)[op_ii,:].reshape(n_sample, n_updates)
             else:
-                logphi_ops = pre_logphi_ops[op_ii].reshape(n_sample, n_updates)
+                logphi_ops = pre_logphi_ops[op_ii,:].reshape(n_sample, n_updates)
+                #theta_ops = pre_theta_ops[op_ii,:].reshape(n_sample, n_updates)
 
-            #print(logphi_ops[0], logphi_ops[-1])
             delta_logphi_os = logphi_ops - logphis
             #delta_theta_os = theta_ops - thetas
             #ops_real = torch.sum(op_coeffs*torch.exp(delta_logphi_os)*torch.cos(delta_theta_os), 1)[...,None]
@@ -351,7 +353,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), net_args=dict(), n_sampl
         return loss_re, (weights*(1-torch.cos(delta_theta))).sum().item(), me_real, cme_real
 
     # # setting optimizer
-    optimizer_theta = torch.optim.Adam(psi_model.model_theta.parameters(), lr=1e-4)
+    optimizer_theta = torch.optim.Adam(psi_model.model_theta.parameters(), lr=learning_rate)
     optimizer_phi = torch.optim.Adam(psi_model.model_phi.parameters(), lr=learning_rate)
     scheduler_theta = torch.optim.lr_scheduler.MultiStepLR(optimizer_theta, [warm_up_sample_length+100], gamma=1)
     scheduler_phi = torch.optim.lr_scheduler.MultiStepLR(optimizer_phi, [warm_up_sample_length+100], gamma=1)

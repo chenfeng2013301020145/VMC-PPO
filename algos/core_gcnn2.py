@@ -336,11 +336,11 @@ class OutPut_real_layer(nn.Module):
             # shape of complex x: (batch_size, F, G, L, W)
             if self.output_mode == 'phi':
                 #return self.linear(torch.sum(x, dim=[2,3,4])/norm).squeeze(-1)
-                return torch.logsumexp(x/norm, dim=[1,2,3,4])
+                return torch.logsumexp(x, dim=[1,2,3,4])/norm
                 #return torch.logsumexp(x, dim=[1,2,3,4])/norm
             else:
                 #return self.linear(torch.sum(x, dim=[2,3,4])/norm).squeeze(-1)
-                return (torch.exp(1j*x).sum(dim=[1,2,3,4])).angle()
+                return ((torch.exp(1j*x)/norm).sum(dim=[1,2,3,4])).angle()
                 #return (torch.exp(1j*x).sum(dim=[1,2,3,4])).angle()
         #theta = torch.sum(z.imag, dim=[1,2,3]) if self.dimensions=='1d' else torch.sum(z.imag, dim=[1,2,3,4])
         #return torch.stack((logphi, theta), dim=1)   

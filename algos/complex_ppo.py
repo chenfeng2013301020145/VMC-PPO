@@ -70,7 +70,7 @@ def train(epochs=100, Ops_args=dict(), Ham_args=dict(), n_sample=80, init_type='
         torch.cuda.manual_seed(seed)
     np.random.seed(seed)
     
-    output_dir = os.path.join('../results', output_fn)
+    output_dir = os.path.join(father_path,'./results', output_fn)
     save_dir = os.path.join(output_dir, 'save_model')
     logger = get_logger(os.path.join(output_dir, 'exp_log.txt'))
 
