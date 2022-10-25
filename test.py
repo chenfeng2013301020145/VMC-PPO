@@ -26,7 +26,7 @@ input_fn = 0
 output_fn ='HS_2d_j1j2_05_gcnnD46_L6W6_ppo'
 
 trained_psi_model, state0 = train(epochs=5000, Ops_args=Ops_args,
-        Ham_args=Ham_args, n_sample=500, n_optimize=50, seed=316890, preload_size=32768*2, batch_size=16384, clip_ratio=0.2,
+        Ham_args=Ham_args, n_sample=500, n_optimize=100, seed=316890, preload_size=32768*2, batch_size=16384, clip_ratio=0.2,
         learning_rate=2e-4, state_size=state_size, save_freq=10,
         net_args=net_args, threads=20, input_fn=input_fn, load_state0=False, warmup_length=300,
         output_fn=output_fn, target_dfs=20, max_beta=10, min_beta=0.5,
