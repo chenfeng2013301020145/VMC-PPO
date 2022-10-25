@@ -86,6 +86,7 @@ class SampleBuffer(Dataset):
         if self._sd > 1:
             self._preload_size += n_sample - (self._sd-1)*self._batch_size
 
+
         batch_label = np.arange(self._preload_size)
         self.preload_uss = self.unique_uss[batch_label,:]
         self.rest_unique_uss = self.unique_uss[self._preload_size:,:]
@@ -119,7 +120,7 @@ class SampleBuffer(Dataset):
         # self.unique_symss = sym_ss[sym_indices]
 
         uss = self.update_states.reshape([-1, self.Dp]+self.single_state_shape)
-        ussv = uss[:,0,:].reshape(-1, self.N).astype(np.int8)
+        ussv = uss[:,0,:].reshape(-1, self.N)
         _, indices, self.uss_inverse_indices = unique_row_view(ussv, 
                                 unique_args=dict(return_index=True, return_inverse=True))
         self.unique_uss = uss[indices]
